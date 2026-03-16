@@ -132,24 +132,20 @@ func TestLiftDelete_ServerDeleteEndpoint(t *testing.T) {
 
 	ctx, _ := newBrowserCtx(t)
 
-	// Use JavaScript fetch to call DELETE endpoint directly (bypassing confirm dialog)
+	// Use synchronous XMLHttpRequest to call DELETE endpoint (bypassing confirm dialog).
+	// Note: chromedp.Evaluate does not await Promises, so we must use sync XHR instead of fetch.
 	var statusCode float64
-	var redirectHeader string
 	err := chromedp.Run(ctx,
 		chromedp.Navigate(fmt.Sprintf("%s/lifts/%d", env.BaseURL, liftID)),
 		chromedp.WaitReady("body"),
 		chromedp.Evaluate(fmt.Sprintf(`
-			(async function() {
-				var resp = await fetch('/lifts/%d', { method: 'DELETE' });
-				return resp.status;
+			(function() {
+				var xhr = new XMLHttpRequest();
+				xhr.open('DELETE', '/lifts/%d', false);
+				xhr.send();
+				return xhr.status;
 			})()
 		`, liftID), &statusCode),
-		chromedp.Evaluate(fmt.Sprintf(`
-			(async function() {
-				var resp = await fetch('/lifts/%d', { method: 'DELETE' });
-				return resp.headers.get('HX-Redirect') || '';
-			})()
-		`, liftID), &redirectHeader),
 	)
 	if err != nil {
 		t.Fatalf("chromedp: %v", err)
@@ -170,7 +166,7 @@ func TestLiftDelete_DeletedLiftAbsentFromList(t *testing.T) {
 	liftID := createTestLift(t, env, "snatch", "2026-03-15T10:00:00Z")
 	createTestLift(t, env, "clean", "2026-02-01T00:00:00Z")
 
-	// Delete via direct HTTP fetch
+	// Delete via synchronous XHR (chromedp.Evaluate does not await Promises)
 	ctx, _ := newBrowserCtx(t)
 
 	var statusCode float64
@@ -178,9 +174,11 @@ func TestLiftDelete_DeletedLiftAbsentFromList(t *testing.T) {
 		chromedp.Navigate(fmt.Sprintf("%s/lifts/%d", env.BaseURL, liftID)),
 		chromedp.WaitReady("body"),
 		chromedp.Evaluate(fmt.Sprintf(`
-			(async function() {
-				var resp = await fetch('/lifts/%d', { method: 'DELETE' });
-				return resp.status;
+			(function() {
+				var xhr = new XMLHttpRequest();
+				xhr.open('DELETE', '/lifts/%d', false);
+				xhr.send();
+				return xhr.status;
 			})()
 		`, liftID), &statusCode),
 	)
@@ -276,9 +274,11 @@ func TestLiftDelete_NoOrphanedFilesE2E(t *testing.T) {
 		chromedp.Navigate(fmt.Sprintf("%s/lifts/%d", env.BaseURL, lift.ID)),
 		chromedp.WaitReady("body"),
 		chromedp.Evaluate(fmt.Sprintf(`
-			(async function() {
-				var resp = await fetch('/lifts/%d', { method: 'DELETE' });
-				return resp.status;
+			(function() {
+				var xhr = new XMLHttpRequest();
+				xhr.open('DELETE', '/lifts/%d', false);
+				xhr.send();
+				return xhr.status;
 			})()
 		`, lift.ID), &statusCode),
 	)
