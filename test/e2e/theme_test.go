@@ -75,25 +75,39 @@ func startServer(t *testing.T) string {
 
 	queries := sqlc.New(db)
 
-	// Parse real templates from disk.
-	tmpl, err := template.ParseGlob(filepath.Join(root, "web", "templates", "layouts", "*.html"))
+	// Parse base layout + partials as shared foundation.
+	base, err := template.ParseGlob(filepath.Join(root, "web", "templates", "layouts", "*.html"))
 	if err != nil {
 		t.Fatalf("parse layouts: %v", err)
 	}
-	tmpl, err = tmpl.ParseGlob(filepath.Join(root, "web", "templates", "pages", "*.html"))
-	if err != nil {
-		t.Fatalf("parse pages: %v", err)
-	}
 	if partials, _ := filepath.Glob(filepath.Join(root, "web", "templates", "partials", "*.html")); len(partials) > 0 {
-		tmpl, err = tmpl.ParseGlob(filepath.Join(root, "web", "templates", "partials", "*.html"))
+		base, err = base.ParseGlob(filepath.Join(root, "web", "templates", "partials", "*.html"))
 		if err != nil {
 			t.Fatalf("parse partials: %v", err)
 		}
 	}
 
+	// Clone base for each page so {{define "content"}} blocks don't conflict.
+	pages, err := filepath.Glob(filepath.Join(root, "web", "templates", "pages", "*.html"))
+	if err != nil {
+		t.Fatalf("glob pages: %v", err)
+	}
+	tmplMap := make(map[string]*template.Template, len(pages))
+	for _, page := range pages {
+		name := filepath.Base(page)
+		clone, err := base.Clone()
+		if err != nil {
+			t.Fatalf("clone base for %s: %v", name, err)
+		}
+		tmplMap[name], err = clone.ParseFiles(page)
+		if err != nil {
+			t.Fatalf("parse page %s: %v", name, err)
+		}
+	}
+
 	srv := &handler.Server{
 		Queries:   queries,
-		Templates: tmpl,
+		Templates: tmplMap,
 		DataDir:   tmpDir,
 	}
 

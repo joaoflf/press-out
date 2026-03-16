@@ -3,6 +3,7 @@ package handler
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"html/template"
 	"mime/multipart"
 	"net/http"
@@ -45,16 +46,29 @@ func setupTestServer(t *testing.T) *Server {
 
 	queries := sqlc.New(db)
 
-	tmpl := template.Must(template.New("base.html").Parse(`<!DOCTYPE html><html>{{block "content" .}}{{end}}</html>`))
-	template.Must(tmpl.New("lift-list-item").Parse(
+	base := template.Must(template.New("base.html").Parse(`<!DOCTYPE html><html>{{block "content" .}}{{end}}</html>`))
+	template.Must(base.New("lift-list-item").Parse(
 		`<a href="/lifts/{{.ID}}" class="lift-item"><span class="type">{{.DisplayType}}</span><span class="date">{{.DisplayDate}}</span>{{if .HasThumbnail}}<img src="/data/lifts/{{.ID}}/thumbnail.jpg">{{end}}</a>`))
-	template.Must(tmpl.New("lift-list.html").Parse(
+	template.Must(base.New("upload-modal").Parse(`<dialog id="upload-modal"></dialog>`))
+	template.Must(base.New("video-player").Parse(
+		`<div class="relative w-full sticky top-0 z-10 bg-black"><video class="w-full" controls playsinline preload="metadata" src="{{.VideoSrc}}"></video></div>`))
+
+	listClone := template.Must(base.Clone())
+	template.Must(listClone.New("lift-list.html").Parse(
 		`{{template "base.html" .}}{{define "content"}}<div>{{if .Empty}}<p>No lifts yet</p>{{else}}{{range .Lifts}}{{template "lift-list-item" .}}{{end}}{{end}}<button onclick="document.getElementById('upload-modal').showModal()">Upload Lift</button></div>{{template "upload-modal" .}}{{end}}`))
-	template.Must(tmpl.New("upload-modal").Parse(`<dialog id="upload-modal"></dialog>`))
+
+	detailClone := template.Must(base.Clone())
+	template.Must(detailClone.New("lift-detail.html").Parse(
+		`{{template "base.html" .}}{{define "content"}}<div><a href="/" class="back-btn" aria-label="Back to lift list">Back</a><h1>{{.DisplayType}}</h1><p>{{.DisplayDate}}</p>{{template "video-player" .}}<div id="coaching-section"></div><div id="phase-timeline-section"></div><div id="metrics-section"></div></div>{{end}}`))
+
+	tmplMap := map[string]*template.Template{
+		"lift-list.html":   listClone,
+		"lift-detail.html": detailClone,
+	}
 
 	return &Server{
 		Queries:   queries,
-		Templates: tmpl,
+		Templates: tmplMap,
 		DataDir:   tmpDir,
 	}
 }
@@ -456,6 +470,140 @@ func TestDataFileServing(t *testing.T) {
 	}
 	if w.Body.String() != "fake jpg data" {
 		t.Error("thumbnail content mismatch")
+	}
+}
+
+// --- Story 1.4: View Lift Detail tests ---
+
+func TestHandleGetLift_ValidID(t *testing.T) {
+	srv := setupTestServer(t)
+
+	lift, err := srv.Queries.CreateLift(context.Background(), sqlc.CreateLiftParams{
+		LiftType:  "snatch",
+		CreatedAt: "2026-03-15T10:00:00Z",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Create original video file
+	if err := storage.CreateLiftDir(srv.DataDir, lift.ID); err != nil {
+		t.Fatal(err)
+	}
+	videoPath := storage.LiftFile(srv.DataDir, lift.ID, storage.FileOriginal)
+	if err := os.WriteFile(videoPath, []byte("fake video"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	mux := http.NewServeMux()
+	srv.RegisterRoutes(mux)
+
+	req := httptest.NewRequest("GET", fmt.Sprintf("/lifts/%d", lift.ID), nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	body := w.Body.String()
+	if !strings.Contains(body, "Snatch") {
+		t.Error("expected lift type 'Snatch' in response")
+	}
+	if !strings.Contains(body, "Mar 15, 2026") {
+		t.Error("expected formatted date in response")
+	}
+	if !strings.Contains(body, "original.mp4") {
+		t.Error("expected video source in response")
+	}
+	if !strings.Contains(body, `href="/"`) {
+		t.Error("expected back button link to /")
+	}
+}
+
+func TestHandleGetLift_InvalidID(t *testing.T) {
+	srv := setupTestServer(t)
+	mux := http.NewServeMux()
+	srv.RegisterRoutes(mux)
+
+	req := httptest.NewRequest("GET", "/lifts/999", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("expected 404, got %d", w.Code)
+	}
+}
+
+func TestHandleGetLift_NonNumericID(t *testing.T) {
+	srv := setupTestServer(t)
+	mux := http.NewServeMux()
+	srv.RegisterRoutes(mux)
+
+	req := httptest.NewRequest("GET", "/lifts/abc", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("expected 404, got %d", w.Code)
+	}
+}
+
+func TestHandleGetLift_BestVideoFile(t *testing.T) {
+	srv := setupTestServer(t)
+
+	lift, err := srv.Queries.CreateLift(context.Background(), sqlc.CreateLiftParams{
+		LiftType:  "clean",
+		CreatedAt: "2026-01-01T00:00:00Z",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := storage.CreateLiftDir(srv.DataDir, lift.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create both original and cropped — should prefer cropped
+	os.WriteFile(storage.LiftFile(srv.DataDir, lift.ID, storage.FileOriginal), []byte("orig"), 0644)
+	os.WriteFile(storage.LiftFile(srv.DataDir, lift.ID, storage.FileCropped), []byte("crop"), 0644)
+
+	mux := http.NewServeMux()
+	srv.RegisterRoutes(mux)
+
+	req := httptest.NewRequest("GET", fmt.Sprintf("/lifts/%d", lift.ID), nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	body := w.Body.String()
+	if !strings.Contains(body, "cropped.mp4") {
+		t.Errorf("expected cropped.mp4 video source, got body: %s", body)
+	}
+}
+
+func TestHandleGetLift_PlaceholderSections(t *testing.T) {
+	srv := setupTestServer(t)
+
+	lift, err := srv.Queries.CreateLift(context.Background(), sqlc.CreateLiftParams{
+		LiftType:  "snatch",
+		CreatedAt: "2026-01-01T00:00:00Z",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mux := http.NewServeMux()
+	srv.RegisterRoutes(mux)
+
+	req := httptest.NewRequest("GET", fmt.Sprintf("/lifts/%d", lift.ID), nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	body := w.Body.String()
+	for _, id := range []string{"coaching-section", "phase-timeline-section", "metrics-section"} {
+		if !strings.Contains(body, id) {
+			t.Errorf("expected placeholder section %q in response", id)
+		}
 	}
 }
 

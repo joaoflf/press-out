@@ -1,12 +1,14 @@
 package handler
 
 import (
+	"fmt"
 	"io"
 	"log/slog"
 	"mime"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -56,7 +58,7 @@ func (s *Server) HandleListLifts(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := s.Templates.ExecuteTemplate(w, "lift-list.html", data); err != nil {
+	if err := s.Templates["lift-list.html"].Execute(w, data); err != nil {
 		slog.Error("failed to render template", "error", err)
 	}
 }
@@ -162,9 +164,55 @@ func formatDate(rfc3339 string) string {
 	return t.Format("Jan 2, 2006")
 }
 
-// HandleGetLift handles GET /lifts/{id} (stub for Story 1.3).
+// LiftDetailData holds template data for the lift detail page.
+type LiftDetailData struct {
+	ID          int64
+	LiftType    string
+	DisplayType string
+	DisplayDate string
+	VideoSrc    string
+}
+
+// HandleGetLift handles GET /lifts/{id} — renders the lift detail page.
 func (s *Server) HandleGetLift(w http.ResponseWriter, r *http.Request) {
-	http.Error(w, "Not Implemented", http.StatusNotImplemented)
+	idStr := r.PathValue("id")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		http.Error(w, "Not Found", http.StatusNotFound)
+		return
+	}
+
+	lift, err := s.Queries.GetLift(r.Context(), id)
+	if err != nil {
+		http.Error(w, "Not Found", http.StatusNotFound)
+		return
+	}
+
+	videoFile := bestVideoFile(s.DataDir, lift.ID)
+
+	data := LiftDetailData{
+		ID:          lift.ID,
+		LiftType:    lift.LiftType,
+		DisplayType: formatLiftType(lift.LiftType),
+		DisplayDate: formatDate(lift.CreatedAt),
+		VideoSrc:    fmt.Sprintf("/data/lifts/%d/%s", lift.ID, videoFile),
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := s.Templates["lift-detail.html"].Execute(w, data); err != nil {
+		slog.Error("failed to render template", "error", err)
+	}
+}
+
+// bestVideoFile returns the best available video filename for a lift,
+// checking in priority order: cropped > trimmed > original.
+func bestVideoFile(dataDir string, liftID int64) string {
+	for _, f := range []string{storage.FileCropped, storage.FileTrimmed, storage.FileOriginal} {
+		if _, err := os.Stat(storage.LiftFile(dataDir, liftID, f)); err == nil {
+			return f
+		}
+	}
+	return storage.FileOriginal
 }
 
 // HandleDeleteLift handles DELETE /lifts/{id} (stub for later stories).

@@ -38,27 +38,44 @@ func main() {
 
 	queries := sqlc.New(db)
 
-	tmpl, err := template.ParseGlob("web/templates/layouts/*.html")
+	// Parse base layout + partials as a shared foundation.
+	base, err := template.ParseGlob("web/templates/layouts/*.html")
 	if err != nil {
 		slog.Error("failed to parse layout templates", "error", err)
 		os.Exit(1)
 	}
-	tmpl, err = tmpl.ParseGlob("web/templates/pages/*.html")
-	if err != nil {
-		slog.Error("failed to parse page templates", "error", err)
-		os.Exit(1)
-	}
 	if partials, _ := filepath.Glob("web/templates/partials/*.html"); len(partials) > 0 {
-		tmpl, err = tmpl.ParseGlob("web/templates/partials/*.html")
+		base, err = base.ParseGlob("web/templates/partials/*.html")
 		if err != nil {
 			slog.Error("failed to parse partial templates", "error", err)
 			os.Exit(1)
 		}
 	}
 
+	// Clone base for each page so {{define "content"}} blocks don't conflict.
+	pages, err := filepath.Glob("web/templates/pages/*.html")
+	if err != nil {
+		slog.Error("failed to glob page templates", "error", err)
+		os.Exit(1)
+	}
+	tmplMap := make(map[string]*template.Template, len(pages))
+	for _, page := range pages {
+		name := filepath.Base(page)
+		clone, err := base.Clone()
+		if err != nil {
+			slog.Error("failed to clone base template", "page", name, "error", err)
+			os.Exit(1)
+		}
+		tmplMap[name], err = clone.ParseFiles(page)
+		if err != nil {
+			slog.Error("failed to parse page template", "page", name, "error", err)
+			os.Exit(1)
+		}
+	}
+
 	srv := &handler.Server{
 		Queries:   queries,
-		Templates: tmpl,
+		Templates: tmplMap,
 		DataDir:   cfg.DataDir,
 	}
 

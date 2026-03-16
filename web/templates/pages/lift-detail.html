@@ -1,0 +1,27 @@
+{{template "base.html" .}}
+
+{{define "content"}}
+<div class="max-w-[430px] mx-auto">
+    {{template "video-player" .}}
+
+    <div class="p-4 flex flex-col gap-4">
+        <div class="flex items-center gap-3">
+            <a href="/" class="flex items-center justify-center w-11 h-11 -ml-2" aria-label="Back to lift list">
+                <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="#2D2D2D" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" />
+                </svg>
+            </a>
+            <div>
+                <h1 class="text-xl font-semibold">{{.DisplayType}}</h1>
+                <p class="text-sm text-base-content/60">{{.DisplayDate}}</p>
+            </div>
+        </div>
+
+        <div id="coaching-section"></div>
+
+        <div id="phase-timeline-section"></div>
+
+        <div id="metrics-section"></div>
+    </div>
+</div>
+{{end}}

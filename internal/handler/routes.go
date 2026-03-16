@@ -10,7 +10,7 @@ import (
 // Server holds dependencies for HTTP handlers.
 type Server struct {
 	Queries   *sqlc.Queries
-	Templates *template.Template
+	Templates map[string]*template.Template
 	DataDir   string
 }
 
