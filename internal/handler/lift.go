@@ -1,8 +1,17 @@
 package handler
 
 import (
+	"io"
 	"log/slog"
+	"mime"
 	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"press-out/internal/storage"
+	"press-out/internal/storage/sqlc"
 )
 
 // LiftListData holds template data for the lift list page.
@@ -44,9 +53,82 @@ func (s *Server) HandleListLifts(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// HandleCreateLift handles POST /lifts (stub for Story 1.2).
+const maxUploadSize = 300 * 1024 * 1024 // 300MB
+
+// HandleCreateLift handles POST /lifts — upload a video with lift type.
 func (s *Server) HandleCreateLift(w http.ResponseWriter, r *http.Request) {
-	http.Error(w, "Not Implemented", http.StatusNotImplemented)
+	r.Body = http.MaxBytesReader(w, r.Body, maxUploadSize)
+
+	if err := r.ParseMultipartForm(32 << 20); err != nil {
+		if strings.Contains(err.Error(), "http: request body too large") {
+			http.Error(w, "File too large (max 300MB)", http.StatusRequestEntityTooLarge)
+			return
+		}
+		http.Error(w, "Invalid form data", http.StatusBadRequest)
+		return
+	}
+
+	liftType := r.FormValue("lift_type")
+	if liftType != "snatch" && liftType != "clean" && liftType != "clean_and_jerk" {
+		http.Error(w, "Invalid lift type", http.StatusBadRequest)
+		return
+	}
+
+	file, header, err := r.FormFile("video")
+	if err != nil {
+		http.Error(w, "No video file provided", http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
+
+	if !isValidVideo(header.Filename, header.Header.Get("Content-Type")) {
+		http.Error(w, "Invalid file type (must be mp4 or mov)", http.StatusBadRequest)
+		return
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	lift, err := s.Queries.CreateLift(r.Context(), sqlc.CreateLiftParams{
+		LiftType:  liftType,
+		CreatedAt: now,
+	})
+	if err != nil {
+		slog.Error("failed to create lift record", "error", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+
+	if err := storage.CreateLiftDir(s.DataDir, lift.ID); err != nil {
+		slog.Error("failed to create lift dir", "error", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+
+	dstPath := storage.LiftFile(s.DataDir, lift.ID, storage.FileOriginal)
+	dst, err := os.Create(dstPath)
+	if err != nil {
+		slog.Error("failed to create file", "error", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+	defer dst.Close()
+
+	if _, err := io.Copy(dst, file); err != nil {
+		slog.Error("failed to save file", "error", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+
+	slog.Info("lift uploaded", "id", lift.ID, "type", liftType)
+	http.Redirect(w, r, "/", http.StatusSeeOther)
+}
+
+func isValidVideo(filename, contentType string) bool {
+	ext := strings.ToLower(filepath.Ext(filename))
+	if ext == ".mp4" || ext == ".mov" {
+		return true
+	}
+	mt, _, _ := mime.ParseMediaType(contentType)
+	return mt == "video/mp4" || mt == "video/quicktime"
 }
 
 // HandleGetLift handles GET /lifts/{id} (stub for Story 1.3).

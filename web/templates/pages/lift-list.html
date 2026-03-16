@@ -20,6 +20,11 @@
     </div>
     {{end}}
 
-    <a href="#" class="btn btn-primary w-full h-12 text-white">Upload Lift</a>
+    <button class="btn btn-primary w-full h-12 text-white"
+            onclick="document.getElementById('upload-modal').showModal()">
+        Upload Lift
+    </button>
 </div>
+
+{{template "upload-modal" .}}
 {{end}}

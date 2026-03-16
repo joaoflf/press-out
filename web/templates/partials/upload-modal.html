@@ -1,0 +1,40 @@
+{{define "upload-modal"}}
+<dialog id="upload-modal" class="modal">
+    <div class="modal-box">
+        <form method="dialog">
+            <button class="btn btn-sm btn-circle btn-ghost absolute right-2 top-2">✕</button>
+        </form>
+        <h3 class="font-bold text-lg mb-4">Upload Lift</h3>
+        <form id="upload-form" method="POST" action="/lifts" enctype="multipart/form-data">
+            <div class="form-control mb-4">
+                <label class="label">
+                    <span class="label-text">Video File</span>
+                </label>
+                <input type="file" name="video" id="upload-file"
+                       accept="video/mp4,video/quicktime,.mp4,.mov"
+                       class="file-input file-input-bordered w-full" />
+            </div>
+
+            <div class="form-control mb-4">
+                <label class="label">
+                    <span class="label-text">Lift Type</span>
+                </label>
+                <div class="join w-full">
+                    <input class="join-item btn flex-1" type="radio" name="lift_type" value="snatch" aria-label="Snatch" />
+                    <input class="join-item btn flex-1" type="radio" name="lift_type" value="clean" aria-label="Clean" />
+                    <input class="join-item btn flex-1" type="radio" name="lift_type" value="clean_and_jerk" aria-label="C&J" />
+                </div>
+            </div>
+
+            <button type="submit" id="upload-submit"
+                    class="btn btn-primary w-full h-12 text-white"
+                    disabled>
+                Upload
+            </button>
+        </form>
+    </div>
+    <form method="dialog" class="modal-backdrop">
+        <button>close</button>
+    </form>
+</dialog>
+{{end}}

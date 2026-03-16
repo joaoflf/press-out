@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"path/filepath"
 
 	"press-out/internal/config"
 	"press-out/internal/handler"
@@ -46,6 +47,13 @@ func main() {
 	if err != nil {
 		slog.Error("failed to parse page templates", "error", err)
 		os.Exit(1)
+	}
+	if partials, _ := filepath.Glob("web/templates/partials/*.html"); len(partials) > 0 {
+		tmpl, err = tmpl.ParseGlob("web/templates/partials/*.html")
+		if err != nil {
+			slog.Error("failed to parse partial templates", "error", err)
+			os.Exit(1)
+		}
 	}
 
 	srv := &handler.Server{

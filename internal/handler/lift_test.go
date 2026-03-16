@@ -1,8 +1,10 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"html/template"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -45,7 +47,8 @@ func setupTestServer(t *testing.T) *Server {
 
 	tmpl := template.Must(template.New("base.html").Parse(`<!DOCTYPE html><html>{{block "content" .}}{{end}}</html>`))
 	template.Must(tmpl.New("lift-list.html").Parse(
-		`{{template "base.html" .}}{{define "content"}}<div>{{if .Empty}}<p>No lifts yet</p>{{else}}{{range .Lifts}}<a href="/lifts/{{.ID}}">{{.LiftType}}</a>{{end}}{{end}}<a href="#">Upload Lift</a></div>{{end}}`))
+		`{{template "base.html" .}}{{define "content"}}<div>{{if .Empty}}<p>No lifts yet</p>{{else}}{{range .Lifts}}<a href="/lifts/{{.ID}}">{{.LiftType}}</a>{{end}}{{end}}<button onclick="document.getElementById('upload-modal').showModal()">Upload Lift</button></div>{{template "upload-modal" .}}{{end}}`))
+	template.Must(tmpl.New("upload-modal").Parse(`<dialog id="upload-modal"></dialog>`))
 
 	return &Server{
 		Queries:   queries,
@@ -104,5 +107,193 @@ func TestHandleListLiftsWithData(t *testing.T) {
 	}
 	if !strings.Contains(body, "snatch") {
 		t.Error("expected lift type in response")
+	}
+}
+
+// --- Story 1.2: Upload tests ---
+
+func createMultipartRequest(t *testing.T, filename, liftType string, content []byte) *http.Request {
+	t.Helper()
+	var buf bytes.Buffer
+	writer := multipart.NewWriter(&buf)
+
+	part, err := writer.CreateFormFile("video", filename)
+	if err != nil {
+		t.Fatalf("create form file: %v", err)
+	}
+	if _, err := part.Write(content); err != nil {
+		t.Fatalf("write content: %v", err)
+	}
+	if err := writer.WriteField("lift_type", liftType); err != nil {
+		t.Fatalf("write field: %v", err)
+	}
+	writer.Close()
+
+	req := httptest.NewRequest("POST", "/lifts", &buf)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	return req
+}
+
+func TestHandleCreateLift_ValidUpload(t *testing.T) {
+	srv := setupTestServer(t)
+	mux := http.NewServeMux()
+	srv.RegisterRoutes(mux)
+
+	content := []byte("fake video content")
+	req := createMultipartRequest(t, "test.mp4", "snatch", content)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusSeeOther {
+		t.Fatalf("expected 303 redirect, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Verify DB record
+	lifts, err := srv.Queries.ListLifts(context.Background())
+	if err != nil {
+		t.Fatalf("list lifts: %v", err)
+	}
+	if len(lifts) != 1 {
+		t.Fatalf("expected 1 lift, got %d", len(lifts))
+	}
+	if lifts[0].LiftType != "snatch" {
+		t.Errorf("expected lift type snatch, got %s", lifts[0].LiftType)
+	}
+
+	// Verify file persisted to correct path
+	filePath := storage.LiftFile(srv.DataDir, lifts[0].ID, storage.FileOriginal)
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		t.Fatalf("read persisted file: %v", err)
+	}
+	if string(data) != string(content) {
+		t.Error("persisted file content mismatch")
+	}
+}
+
+func TestHandleCreateLift_MovFile(t *testing.T) {
+	srv := setupTestServer(t)
+	mux := http.NewServeMux()
+	srv.RegisterRoutes(mux)
+
+	content := []byte("mov video content")
+	req := createMultipartRequest(t, "video.mov", "clean_and_jerk", content)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusSeeOther {
+		t.Fatalf("expected 303, got %d: %s", w.Code, w.Body.String())
+	}
+
+	lifts, _ := srv.Queries.ListLifts(context.Background())
+	if len(lifts) != 1 {
+		t.Fatalf("expected 1 lift, got %d", len(lifts))
+	}
+	if lifts[0].LiftType != "clean_and_jerk" {
+		t.Errorf("expected clean_and_jerk, got %s", lifts[0].LiftType)
+	}
+
+	filePath := storage.LiftFile(srv.DataDir, lifts[0].ID, storage.FileOriginal)
+	if _, err := os.Stat(filePath); os.IsNotExist(err) {
+		t.Error("file should be persisted")
+	}
+}
+
+func TestHandleCreateLift_InvalidFileType(t *testing.T) {
+	srv := setupTestServer(t)
+	mux := http.NewServeMux()
+	srv.RegisterRoutes(mux)
+
+	req := createMultipartRequest(t, "test.txt", "snatch", []byte("not a video"))
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", w.Code)
+	}
+
+	// Verify no DB record created
+	lifts, _ := srv.Queries.ListLifts(context.Background())
+	if len(lifts) != 0 {
+		t.Error("no lift should be created for invalid file type")
+	}
+}
+
+func TestHandleCreateLift_InvalidLiftType(t *testing.T) {
+	srv := setupTestServer(t)
+	mux := http.NewServeMux()
+	srv.RegisterRoutes(mux)
+
+	req := createMultipartRequest(t, "test.mp4", "deadlift", []byte("video"))
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", w.Code)
+	}
+}
+
+func TestHandleCreateLift_NoFile(t *testing.T) {
+	srv := setupTestServer(t)
+	mux := http.NewServeMux()
+	srv.RegisterRoutes(mux)
+
+	var buf bytes.Buffer
+	writer := multipart.NewWriter(&buf)
+	writer.WriteField("lift_type", "snatch")
+	writer.Close()
+
+	req := httptest.NewRequest("POST", "/lifts", &buf)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for missing file, got %d", w.Code)
+	}
+}
+
+func TestHandleCreateLift_CleanType(t *testing.T) {
+	srv := setupTestServer(t)
+	mux := http.NewServeMux()
+	srv.RegisterRoutes(mux)
+
+	req := createMultipartRequest(t, "lift.mp4", "clean", []byte("video data"))
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusSeeOther {
+		t.Fatalf("expected 303, got %d: %s", w.Code, w.Body.String())
+	}
+
+	lifts, _ := srv.Queries.ListLifts(context.Background())
+	if len(lifts) != 1 || lifts[0].LiftType != "clean" {
+		t.Errorf("expected clean lift, got %v", lifts)
+	}
+}
+
+func TestIsValidVideo(t *testing.T) {
+	tests := []struct {
+		filename    string
+		contentType string
+		want        bool
+	}{
+		{"video.mp4", "", true},
+		{"video.MP4", "", true},
+		{"video.mov", "", true},
+		{"video.MOV", "", true},
+		{"video.txt", "", false},
+		{"video.avi", "", false},
+		{"video", "video/mp4", true},
+		{"video", "video/quicktime", true},
+		{"video", "text/plain", false},
+	}
+
+	for _, tt := range tests {
+		got := isValidVideo(tt.filename, tt.contentType)
+		if got != tt.want {
+			t.Errorf("isValidVideo(%q, %q) = %v, want %v", tt.filename, tt.contentType, got, tt.want)
+		}
 	}
 }
