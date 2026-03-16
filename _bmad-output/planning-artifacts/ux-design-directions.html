@@ -1,0 +1,1514 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>press-out — Design Direction Mockups</title>
+<style>
+  :root {
+    --bg: #FAFAF8;
+    --text: #2D2D2D;
+    --sage: #8BA888;
+    --sage-light: #B5CBB3;
+    --sage-dark: #6E8E6B;
+    --stone: #C4BFAE;
+    --neutral: #EDEDEA;
+    --info: #9BB0BA;
+    --success: #7DA67D;
+    --white: #FFFFFF;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    background: #E8E6E1;
+    color: var(--text);
+    padding: 24px;
+  }
+
+  h1 {
+    font-size: 28px;
+    font-weight: 600;
+    margin-bottom: 8px;
+    color: var(--text);
+  }
+
+  .intro {
+    font-size: 14px;
+    color: #666;
+    margin-bottom: 32px;
+    max-width: 700px;
+    line-height: 1.6;
+  }
+
+  .directions-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(375px, 1fr));
+    gap: 32px;
+    max-width: 1600px;
+  }
+
+  .direction {
+    background: var(--bg);
+    border-radius: 16px;
+    overflow: hidden;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+  }
+
+  .direction-header {
+    padding: 16px 20px;
+    background: var(--neutral);
+    border-bottom: 1px solid #DDD;
+  }
+
+  .direction-header h2 {
+    font-size: 16px;
+    font-weight: 600;
+    margin-bottom: 4px;
+  }
+
+  .direction-header p {
+    font-size: 12px;
+    color: #888;
+    line-height: 1.4;
+  }
+
+  /* Phone frame */
+  .phone-frame {
+    max-width: 375px;
+    margin: 20px auto;
+    background: var(--bg);
+    border-radius: 24px;
+    overflow: hidden;
+    border: 2px solid var(--neutral);
+    position: relative;
+  }
+
+  .phone-frame::before {
+    content: '';
+    display: block;
+    width: 80px;
+    height: 4px;
+    background: var(--neutral);
+    border-radius: 2px;
+    margin: 8px auto;
+  }
+
+  .phone-content {
+    height: 720px;
+    overflow-y: auto;
+    scrollbar-width: thin;
+  }
+
+  /* Video placeholder */
+  .video-placeholder {
+    width: 100%;
+    aspect-ratio: 16/9;
+    background: linear-gradient(135deg, #3a3a3a 0%, #555 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    color: #999;
+    font-size: 12px;
+  }
+
+  .video-placeholder .skeleton-lines {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .skeleton-figure {
+    width: 60px;
+    height: 120px;
+    position: relative;
+  }
+
+  .skeleton-figure .joint {
+    width: 6px;
+    height: 6px;
+    background: var(--sage);
+    border-radius: 50%;
+    position: absolute;
+  }
+
+  .skeleton-figure .bone {
+    position: absolute;
+    background: var(--sage-light);
+    height: 2px;
+    transform-origin: left center;
+  }
+
+  .skeleton-figure .head { top: 0; left: 27px; width: 8px; height: 8px; }
+  .skeleton-figure .neck { top: 10px; left: 28px; }
+  .skeleton-figure .shoulder-l { top: 18px; left: 12px; }
+  .skeleton-figure .shoulder-r { top: 18px; left: 42px; }
+  .skeleton-figure .hip-l { top: 55px; left: 18px; }
+  .skeleton-figure .hip-r { top: 55px; left: 38px; }
+  .skeleton-figure .knee-l { top: 80px; left: 14px; }
+  .skeleton-figure .knee-r { top: 80px; left: 42px; }
+  .skeleton-figure .ankle-l { top: 105px; left: 16px; }
+  .skeleton-figure .ankle-r { top: 105px; left: 40px; }
+  .skeleton-figure .elbow-l { top: 36px; left: 4px; }
+  .skeleton-figure .elbow-r { top: 30px; left: 52px; }
+  .skeleton-figure .wrist-l { top: 20px; left: 0px; }
+  .skeleton-figure .wrist-r { top: 14px; left: 56px; }
+
+  .toggle-indicator {
+    position: absolute;
+    bottom: 8px;
+    right: 8px;
+    font-size: 10px;
+    background: rgba(0,0,0,0.5);
+    color: var(--sage-light);
+    padding: 3px 8px;
+    border-radius: 4px;
+  }
+
+  /* === DIRECTION A: Stacked Flow === */
+  .dir-a .controls-strip {
+    display: flex;
+    gap: 0;
+    background: var(--neutral);
+    padding: 0;
+  }
+
+  .dir-a .speed-btn {
+    flex: 1;
+    padding: 10px 0;
+    text-align: center;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text);
+    background: transparent;
+    border: none;
+    cursor: pointer;
+  }
+
+  .dir-a .speed-btn.active {
+    background: var(--sage);
+    color: var(--white);
+  }
+
+  .dir-a .phase-bar {
+    display: flex;
+    height: 44px;
+    background: var(--neutral);
+    margin: 0;
+  }
+
+  .dir-a .phase-segment {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 9px;
+    font-weight: 500;
+    color: var(--text);
+    border-right: 1px solid var(--bg);
+  }
+
+  .dir-a .phase-segment:nth-child(1) { flex: 1; background: #D4E4D2; }
+  .dir-a .phase-segment:nth-child(2) { flex: 2; background: #C1D8BE; }
+  .dir-a .phase-segment:nth-child(3) { flex: 1; background: #AECCAB; }
+  .dir-a .phase-segment:nth-child(4) { flex: 2; background: #9BC098; }
+  .dir-a .phase-segment:nth-child(5) { flex: 2; background: #88B485; }
+  .dir-a .phase-segment:nth-child(6) { flex: 1; background: #75A872; }
+
+  .dir-a .content-area { padding: 16px; }
+
+  .dir-a .coaching-card {
+    background: var(--bg);
+    border-left: 3px solid var(--info);
+    padding: 12px 14px;
+    margin-bottom: 16px;
+    border-radius: 0 8px 8px 0;
+  }
+
+  .dir-a .coaching-label {
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--info);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 6px;
+  }
+
+  .dir-a .coaching-diagnosis {
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--text);
+    margin-bottom: 8px;
+  }
+
+  .dir-a .coaching-cue {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text);
+    line-height: 1.4;
+  }
+
+  .dir-a .metrics-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+
+  .dir-a .metric-cell {
+    background: var(--neutral);
+    border-radius: 8px;
+    padding: 12px;
+    text-align: center;
+  }
+
+  .dir-a .metric-value {
+    font-size: 22px;
+    font-weight: 700;
+    color: var(--text);
+  }
+
+  .dir-a .metric-label {
+    font-size: 10px;
+    font-weight: 500;
+    color: #888;
+    margin-top: 2px;
+  }
+
+  /* === DIRECTION B: Coaching Hero === */
+  .dir-b .coaching-hero {
+    background: var(--white);
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--neutral);
+  }
+
+  .dir-b .cue-text {
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--text);
+    line-height: 1.4;
+    margin-bottom: 6px;
+  }
+
+  .dir-b .diagnosis-text {
+    font-size: 12px;
+    color: #777;
+    line-height: 1.5;
+  }
+
+  .dir-b .controls-row {
+    display: flex;
+    align-items: center;
+    padding: 8px 16px;
+    gap: 8px;
+    background: var(--bg);
+  }
+
+  .dir-b .speed-pill {
+    padding: 6px 14px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 500;
+    background: var(--neutral);
+    color: var(--text);
+    border: none;
+  }
+
+  .dir-b .speed-pill.active {
+    background: var(--sage);
+    color: var(--white);
+  }
+
+  .dir-b .phase-bar {
+    display: flex;
+    height: 36px;
+    margin: 0 16px;
+    border-radius: 8px;
+    overflow: hidden;
+    margin-bottom: 12px;
+  }
+
+  .dir-b .phase-segment {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 8px;
+    font-weight: 500;
+    color: var(--text);
+  }
+
+  .dir-b .phase-segment:nth-child(1) { flex: 1; background: #D4E4D2; }
+  .dir-b .phase-segment:nth-child(2) { flex: 2; background: #C1D8BE; }
+  .dir-b .phase-segment:nth-child(3) { flex: 1; background: #AECCAB; }
+  .dir-b .phase-segment:nth-child(4) { flex: 2; background: #9BC098; }
+  .dir-b .phase-segment:nth-child(5) { flex: 2; background: #88B485; }
+  .dir-b .phase-segment:nth-child(6) { flex: 1; background: #75A872; }
+
+  .dir-b .metrics-strip {
+    display: flex;
+    gap: 0;
+    padding: 0 16px;
+    margin-bottom: 12px;
+  }
+
+  .dir-b .metric-item {
+    flex: 1;
+    text-align: center;
+    padding: 10px 4px;
+    border-right: 1px solid var(--neutral);
+  }
+
+  .dir-b .metric-item:last-child { border-right: none; }
+
+  .dir-b .metric-value {
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--text);
+  }
+
+  .dir-b .metric-label {
+    font-size: 8px;
+    color: #999;
+    margin-top: 2px;
+    font-weight: 500;
+  }
+
+  /* === DIRECTION C: Compact Dense === */
+  .dir-c .controls-inline {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 6px 12px;
+    background: var(--neutral);
+  }
+
+  .dir-c .speed-group {
+    display: flex;
+    gap: 2px;
+  }
+
+  .dir-c .speed-sm {
+    padding: 5px 10px;
+    font-size: 11px;
+    font-weight: 500;
+    background: transparent;
+    border: none;
+    border-radius: 4px;
+    color: var(--text);
+  }
+
+  .dir-c .speed-sm.active {
+    background: var(--sage);
+    color: var(--white);
+  }
+
+  .dir-c .toggle-label {
+    font-size: 10px;
+    color: var(--sage);
+    font-weight: 600;
+  }
+
+  .dir-c .phase-timeline {
+    display: flex;
+    height: 28px;
+    margin: 0;
+    background: var(--neutral);
+    border-top: 1px solid #DDD;
+  }
+
+  .dir-c .phase-seg {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 7px;
+    font-weight: 600;
+    color: var(--text);
+    border-right: 1px solid var(--bg);
+  }
+
+  .dir-c .phase-seg:nth-child(1) { flex: 1; background: #D4E4D2; }
+  .dir-c .phase-seg:nth-child(2) { flex: 2; background: #C1D8BE; }
+  .dir-c .phase-seg:nth-child(3) { flex: 1; background: #AECCAB; }
+  .dir-c .phase-seg:nth-child(4) { flex: 2; background: #9BC098; }
+  .dir-c .phase-seg:nth-child(5) { flex: 2; background: #88B485; }
+  .dir-c .phase-seg:nth-child(6) { flex: 1; background: #75A872; }
+
+  .dir-c .dense-content { padding: 10px 12px; }
+
+  .dir-c .metrics-compact {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 6px;
+    margin-bottom: 10px;
+  }
+
+  .dir-c .metric-box {
+    background: var(--neutral);
+    border-radius: 6px;
+    padding: 8px;
+    text-align: center;
+  }
+
+  .dir-c .metric-val {
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--text);
+  }
+
+  .dir-c .metric-lbl {
+    font-size: 8px;
+    color: #999;
+    font-weight: 500;
+    margin-top: 1px;
+  }
+
+  .dir-c .coaching-compact {
+    border-left: 2px solid var(--info);
+    padding: 8px 10px;
+    background: var(--white);
+    border-radius: 0 6px 6px 0;
+  }
+
+  .dir-c .cc-label {
+    font-size: 9px;
+    color: var(--info);
+    font-weight: 600;
+    margin-bottom: 4px;
+  }
+
+  .dir-c .cc-cue {
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1.4;
+    margin-bottom: 4px;
+  }
+
+  .dir-c .cc-diag {
+    font-size: 11px;
+    color: #777;
+    line-height: 1.4;
+  }
+
+  /* === DIRECTION D: Card Sections === */
+  .dir-d .content-cards { padding: 12px; }
+
+  .dir-d .section-card {
+    background: var(--white);
+    border-radius: 12px;
+    padding: 14px;
+    margin-bottom: 10px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+  }
+
+  .dir-d .card-title {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--stone);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 10px;
+  }
+
+  .dir-d .speed-row {
+    display: flex;
+    gap: 6px;
+  }
+
+  .dir-d .speed-chip {
+    flex: 1;
+    padding: 10px 0;
+    text-align: center;
+    font-size: 13px;
+    font-weight: 500;
+    background: var(--neutral);
+    border: none;
+    border-radius: 8px;
+    color: var(--text);
+  }
+
+  .dir-d .speed-chip.active {
+    background: var(--sage);
+    color: var(--white);
+  }
+
+  .dir-d .phase-bar {
+    display: flex;
+    height: 40px;
+    border-radius: 8px;
+    overflow: hidden;
+  }
+
+  .dir-d .phase-segment {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 8px;
+    font-weight: 500;
+    color: var(--text);
+  }
+
+  .dir-d .phase-segment:nth-child(1) { flex: 1; background: #D4E4D2; }
+  .dir-d .phase-segment:nth-child(2) { flex: 2; background: #C1D8BE; }
+  .dir-d .phase-segment:nth-child(3) { flex: 1; background: #AECCAB; }
+  .dir-d .phase-segment:nth-child(4) { flex: 2; background: #9BC098; }
+  .dir-d .phase-segment:nth-child(5) { flex: 2; background: #88B485; }
+  .dir-d .phase-segment:nth-child(6) { flex: 1; background: #75A872; }
+
+  .dir-d .metrics-2col {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+
+  .dir-d .m-cell {
+    background: var(--neutral);
+    border-radius: 8px;
+    padding: 10px;
+  }
+
+  .dir-d .m-val {
+    font-size: 20px;
+    font-weight: 700;
+  }
+
+  .dir-d .m-lbl {
+    font-size: 9px;
+    color: #888;
+    font-weight: 500;
+    margin-top: 2px;
+  }
+
+  .dir-d .coaching-section {
+    border-left: 3px solid var(--info);
+    padding-left: 12px;
+  }
+
+  .dir-d .c-cue {
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 1.4;
+    margin-bottom: 6px;
+  }
+
+  .dir-d .c-diag {
+    font-size: 12px;
+    color: #777;
+    line-height: 1.5;
+  }
+
+  /* === DIRECTION E: Minimal Float === */
+  .dir-e .video-placeholder {
+    position: relative;
+  }
+
+  .dir-e .floating-controls {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    display: flex;
+    justify-content: center;
+    gap: 4px;
+    padding: 8px;
+    background: linear-gradient(transparent, rgba(0,0,0,0.4));
+  }
+
+  .dir-e .float-speed {
+    padding: 5px 12px;
+    font-size: 11px;
+    font-weight: 500;
+    background: rgba(255,255,255,0.15);
+    border: none;
+    border-radius: 4px;
+    color: #ccc;
+  }
+
+  .dir-e .float-speed.active {
+    background: var(--sage);
+    color: var(--white);
+  }
+
+  .dir-e .minimal-content { padding: 16px; }
+
+  .dir-e .cue-hero {
+    font-size: 17px;
+    font-weight: 600;
+    line-height: 1.4;
+    color: var(--text);
+    margin-bottom: 6px;
+  }
+
+  .dir-e .diag-sub {
+    font-size: 12px;
+    color: #888;
+    line-height: 1.5;
+    margin-bottom: 16px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid var(--neutral);
+  }
+
+  .dir-e .phase-minimal {
+    display: flex;
+    height: 32px;
+    border-radius: 6px;
+    overflow: hidden;
+    margin-bottom: 16px;
+  }
+
+  .dir-e .pm-seg {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 7px;
+    font-weight: 600;
+    color: var(--text);
+  }
+
+  .dir-e .pm-seg:nth-child(1) { flex: 1; background: #D4E4D2; }
+  .dir-e .pm-seg:nth-child(2) { flex: 2; background: #C1D8BE; }
+  .dir-e .pm-seg:nth-child(3) { flex: 1; background: #AECCAB; }
+  .dir-e .pm-seg:nth-child(4) { flex: 2; background: #9BC098; }
+  .dir-e .pm-seg:nth-child(5) { flex: 2; background: #88B485; }
+  .dir-e .pm-seg:nth-child(6) { flex: 1; background: #75A872; }
+
+  .dir-e .metrics-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 8px;
+  }
+
+  .dir-e .mr-cell {
+    text-align: center;
+    padding: 10px 4px;
+    background: var(--neutral);
+    border-radius: 8px;
+  }
+
+  .dir-e .mr-val {
+    font-size: 18px;
+    font-weight: 700;
+  }
+
+  .dir-e .mr-lbl {
+    font-size: 8px;
+    color: #999;
+    font-weight: 500;
+    margin-top: 2px;
+  }
+
+  /* === DIRECTION F: List View / Lift List === */
+  .dir-f .list-header {
+    padding: 16px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .dir-f .list-title {
+    font-size: 20px;
+    font-weight: 600;
+  }
+
+  .dir-f .upload-btn {
+    background: var(--sage);
+    color: var(--white);
+    border: none;
+    border-radius: 8px;
+    padding: 10px 20px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .dir-f .lift-item {
+    display: flex;
+    align-items: center;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--neutral);
+    gap: 12px;
+    cursor: pointer;
+  }
+
+  .dir-f .lift-item:hover {
+    background: var(--neutral);
+  }
+
+  .dir-f .lift-thumb {
+    width: 64px;
+    height: 48px;
+    background: linear-gradient(135deg, #3a3a3a, #555);
+    border-radius: 6px;
+    flex-shrink: 0;
+  }
+
+  .dir-f .lift-info {
+    flex: 1;
+  }
+
+  .dir-f .lift-type {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text);
+  }
+
+  .dir-f .lift-date {
+    font-size: 12px;
+    color: #999;
+    margin-top: 2px;
+  }
+
+  .dir-f .lift-badge {
+    font-size: 10px;
+    font-weight: 600;
+    padding: 3px 8px;
+    border-radius: 4px;
+    background: var(--neutral);
+    color: var(--text);
+  }
+
+  .dir-f .lift-chevron {
+    color: var(--stone);
+    font-size: 18px;
+  }
+
+  /* === DIRECTION G: Upload Screen === */
+  .dir-g .upload-content {
+    padding: 24px 16px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 20px;
+    min-height: 600px;
+    justify-content: center;
+  }
+
+  .dir-g .upload-zone {
+    width: 100%;
+    aspect-ratio: 16/10;
+    border: 2px dashed var(--stone);
+    border-radius: 12px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    color: var(--stone);
+    cursor: pointer;
+  }
+
+  .dir-g .upload-zone:hover {
+    border-color: var(--sage);
+    color: var(--sage);
+  }
+
+  .dir-g .upload-icon {
+    font-size: 36px;
+  }
+
+  .dir-g .upload-text {
+    font-size: 14px;
+    font-weight: 500;
+  }
+
+  .dir-g .upload-sub {
+    font-size: 11px;
+    color: #bbb;
+  }
+
+  .dir-g .lift-type-selector {
+    width: 100%;
+    display: flex;
+    gap: 8px;
+  }
+
+  .dir-g .type-option {
+    flex: 1;
+    padding: 14px 8px;
+    text-align: center;
+    font-size: 13px;
+    font-weight: 500;
+    background: var(--neutral);
+    border: 2px solid transparent;
+    border-radius: 10px;
+    color: var(--text);
+    cursor: pointer;
+  }
+
+  .dir-g .type-option.selected {
+    border-color: var(--sage);
+    background: #EDF4EC;
+  }
+
+  .dir-g .submit-btn {
+    width: 100%;
+    padding: 16px;
+    background: var(--sage);
+    color: var(--white);
+    border: none;
+    border-radius: 10px;
+    font-size: 16px;
+    font-weight: 600;
+    cursor: pointer;
+    opacity: 0.5;
+  }
+
+  .dir-g .submit-btn.ready { opacity: 1; }
+
+  /* === DIRECTION H: Pipeline Progress === */
+  .dir-h .progress-content {
+    padding: 24px 16px;
+  }
+
+  .dir-h .progress-title {
+    font-size: 16px;
+    font-weight: 600;
+    margin-bottom: 4px;
+  }
+
+  .dir-h .progress-sub {
+    font-size: 12px;
+    color: #999;
+    margin-bottom: 24px;
+  }
+
+  .dir-h .stage-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+  }
+
+  .dir-h .stage-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 0;
+    border-bottom: 1px solid var(--neutral);
+  }
+
+  .dir-h .stage-icon {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 13px;
+    flex-shrink: 0;
+  }
+
+  .dir-h .stage-done .stage-icon {
+    background: var(--success);
+    color: var(--white);
+  }
+
+  .dir-h .stage-active .stage-icon {
+    background: var(--sage);
+    color: var(--white);
+    animation: pulse 1.5s ease-in-out infinite;
+  }
+
+  .dir-h .stage-pending .stage-icon {
+    background: var(--neutral);
+    color: var(--stone);
+  }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.6; }
+  }
+
+  .dir-h .stage-name {
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text);
+  }
+
+  .dir-h .stage-pending .stage-name {
+    color: var(--stone);
+  }
+
+  .dir-h .stage-time {
+    font-size: 11px;
+    color: #999;
+    margin-left: auto;
+  }
+
+  .dir-h .video-preview {
+    margin-top: 24px;
+    width: 100%;
+    aspect-ratio: 16/9;
+    background: linear-gradient(135deg, #3a3a3a 0%, #555 100%);
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #666;
+    font-size: 12px;
+  }
+</style>
+</head>
+<body>
+
+<h1>press-out — Design Directions</h1>
+<p class="intro">
+  Six variations of the lift detail view exploring different information hierarchies, plus the lift list, upload, and pipeline progress screens. All use the muted sage / warm white / Danish design palette. Open on mobile or resize your browser to 375px for realistic proportions.
+</p>
+
+<div class="directions-grid">
+
+  <!-- DIRECTION A: Stacked Flow -->
+  <div class="direction dir-a">
+    <div class="direction-header">
+      <h2>A: Stacked Flow</h2>
+      <p>Video → speed strip → phase bar → coaching → metrics. Linear top-to-bottom, coaching before metrics. Phase bar is full-width, flush with video.</p>
+    </div>
+    <div class="phone-frame">
+      <div class="phone-content">
+        <div class="video-placeholder">
+          <div class="skeleton-lines">
+            <div class="skeleton-figure">
+              <div class="joint head"></div>
+              <div class="joint neck"></div>
+              <div class="joint shoulder-l"></div>
+              <div class="joint shoulder-r"></div>
+              <div class="joint elbow-l"></div>
+              <div class="joint elbow-r"></div>
+              <div class="joint wrist-l"></div>
+              <div class="joint wrist-r"></div>
+              <div class="joint hip-l"></div>
+              <div class="joint hip-r"></div>
+              <div class="joint knee-l"></div>
+              <div class="joint knee-r"></div>
+              <div class="joint ankle-l"></div>
+              <div class="joint ankle-r"></div>
+            </div>
+          </div>
+          <div class="toggle-indicator">Skeleton</div>
+        </div>
+        <div class="controls-strip">
+          <button class="speed-btn">0.25x</button>
+          <button class="speed-btn active">0.5x</button>
+          <button class="speed-btn">1x</button>
+        </div>
+        <div class="phase-bar">
+          <div class="phase-segment">Setup</div>
+          <div class="phase-segment">1st Pull</div>
+          <div class="phase-segment">Trans.</div>
+          <div class="phase-segment">2nd Pull</div>
+          <div class="phase-segment">Catch</div>
+          <div class="phase-segment">Recov.</div>
+        </div>
+        <div class="content-area">
+          <div class="coaching-card">
+            <div class="coaching-label">Coaching</div>
+            <div class="coaching-cue">Punch through the bar and sit your hips straight down the moment you feel the pull finish.</div>
+            <div class="coaching-diagnosis">Bar pulled to sternum height but catch depth is only quarter squat. High pull forces a forward catch, causing elbow buckle at 142&deg;.</div>
+          </div>
+          <div class="metrics-grid">
+            <div class="metric-cell">
+              <div class="metric-value">1.32</div>
+              <div class="metric-label">Pull-to-Catch</div>
+            </div>
+            <div class="metric-cell">
+              <div class="metric-value">1.8 m/s</div>
+              <div class="metric-label">Peak Velocity</div>
+            </div>
+            <div class="metric-cell">
+              <div class="metric-value">142&deg;</div>
+              <div class="metric-label">Elbow at Catch</div>
+            </div>
+            <div class="metric-cell">
+              <div class="metric-value">0.31s</div>
+              <div class="metric-label">2nd Pull Duration</div>
+            </div>
+            <div class="metric-cell">
+              <div class="metric-value">+4cm</div>
+              <div class="metric-label">Bar Path Drift</div>
+            </div>
+            <div class="metric-cell">
+              <div class="metric-value">0.82s</div>
+              <div class="metric-label">Total Lift Time</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- DIRECTION B: Coaching Hero -->
+  <div class="direction dir-b">
+    <div class="direction-header">
+      <h2>B: Coaching Hero</h2>
+      <p>Coaching cue appears immediately below video as a hero element. Metrics condensed into a single horizontal strip. Cue is the first thing you read.</p>
+    </div>
+    <div class="phone-frame">
+      <div class="phone-content">
+        <div class="video-placeholder">
+          <div class="skeleton-lines">
+            <div class="skeleton-figure">
+              <div class="joint head"></div>
+              <div class="joint neck"></div>
+              <div class="joint shoulder-l"></div>
+              <div class="joint shoulder-r"></div>
+              <div class="joint elbow-l"></div>
+              <div class="joint elbow-r"></div>
+              <div class="joint wrist-l"></div>
+              <div class="joint wrist-r"></div>
+              <div class="joint hip-l"></div>
+              <div class="joint hip-r"></div>
+              <div class="joint knee-l"></div>
+              <div class="joint knee-r"></div>
+              <div class="joint ankle-l"></div>
+              <div class="joint ankle-r"></div>
+            </div>
+          </div>
+          <div class="toggle-indicator">Skeleton</div>
+        </div>
+        <div class="coaching-hero">
+          <div class="cue-text">Punch through the bar and sit your hips straight down the moment you feel the pull finish.</div>
+          <div class="diagnosis-text">Bar pulled to sternum height but catch depth is only quarter squat. High pull forces a forward catch, causing elbow buckle at 142&deg;.</div>
+        </div>
+        <div class="controls-row">
+          <button class="speed-pill">0.25x</button>
+          <button class="speed-pill active">0.5x</button>
+          <button class="speed-pill">1x</button>
+        </div>
+        <div class="phase-bar">
+          <div class="phase-segment">Setup</div>
+          <div class="phase-segment">1st Pull</div>
+          <div class="phase-segment">Trans.</div>
+          <div class="phase-segment">2nd Pull</div>
+          <div class="phase-segment">Catch</div>
+          <div class="phase-segment">Recov.</div>
+        </div>
+        <div class="metrics-strip">
+          <div class="metric-item">
+            <div class="metric-value">1.32</div>
+            <div class="metric-label">P:C Ratio</div>
+          </div>
+          <div class="metric-item">
+            <div class="metric-value">1.8</div>
+            <div class="metric-label">Vel m/s</div>
+          </div>
+          <div class="metric-item">
+            <div class="metric-value">142&deg;</div>
+            <div class="metric-label">Elbow</div>
+          </div>
+          <div class="metric-item">
+            <div class="metric-value">0.31</div>
+            <div class="metric-label">2nd Pull</div>
+          </div>
+          <div class="metric-item">
+            <div class="metric-value">+4</div>
+            <div class="metric-label">Drift cm</div>
+          </div>
+          <div class="metric-item">
+            <div class="metric-value">0.82</div>
+            <div class="metric-label">Total s</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- DIRECTION C: Compact Dense -->
+  <div class="direction dir-c">
+    <div class="direction-header">
+      <h2>C: Compact Dense</h2>
+      <p>Maximum information density. 3-column metric grid, thin phase bar, compact coaching. Everything visible without scrolling on most phones.</p>
+    </div>
+    <div class="phone-frame">
+      <div class="phone-content">
+        <div class="video-placeholder">
+          <div class="skeleton-lines">
+            <div class="skeleton-figure">
+              <div class="joint head"></div>
+              <div class="joint neck"></div>
+              <div class="joint shoulder-l"></div>
+              <div class="joint shoulder-r"></div>
+              <div class="joint elbow-l"></div>
+              <div class="joint elbow-r"></div>
+              <div class="joint wrist-l"></div>
+              <div class="joint wrist-r"></div>
+              <div class="joint hip-l"></div>
+              <div class="joint hip-r"></div>
+              <div class="joint knee-l"></div>
+              <div class="joint knee-r"></div>
+              <div class="joint ankle-l"></div>
+              <div class="joint ankle-r"></div>
+            </div>
+          </div>
+          <div class="toggle-indicator">Skeleton</div>
+        </div>
+        <div class="controls-inline">
+          <div class="speed-group">
+            <button class="speed-sm">0.25x</button>
+            <button class="speed-sm active">0.5x</button>
+            <button class="speed-sm">1x</button>
+          </div>
+          <span class="toggle-label">Tap video to toggle</span>
+        </div>
+        <div class="phase-timeline">
+          <div class="phase-seg">Setup</div>
+          <div class="phase-seg">1st Pull</div>
+          <div class="phase-seg">Trans.</div>
+          <div class="phase-seg">2nd Pull</div>
+          <div class="phase-seg">Catch</div>
+          <div class="phase-seg">Recov.</div>
+        </div>
+        <div class="dense-content">
+          <div class="metrics-compact">
+            <div class="metric-box">
+              <div class="metric-val">1.32</div>
+              <div class="metric-lbl">Pull:Catch</div>
+            </div>
+            <div class="metric-box">
+              <div class="metric-val">1.8</div>
+              <div class="metric-lbl">Vel m/s</div>
+            </div>
+            <div class="metric-box">
+              <div class="metric-val">142&deg;</div>
+              <div class="metric-lbl">Elbow</div>
+            </div>
+            <div class="metric-box">
+              <div class="metric-val">0.31s</div>
+              <div class="metric-lbl">2nd Pull</div>
+            </div>
+            <div class="metric-box">
+              <div class="metric-val">+4cm</div>
+              <div class="metric-lbl">Bar Drift</div>
+            </div>
+            <div class="metric-box">
+              <div class="metric-val">0.82s</div>
+              <div class="metric-lbl">Total</div>
+            </div>
+          </div>
+          <div class="coaching-compact">
+            <div class="cc-label">Coaching</div>
+            <div class="cc-cue">Punch through the bar and sit your hips straight down the moment you feel the pull finish.</div>
+            <div class="cc-diag">Bar pulled to sternum height, catch only quarter squat. High pull &rarr; forward catch &rarr; elbow buckle at 142&deg;.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- DIRECTION D: Card Sections -->
+  <div class="direction dir-d">
+    <div class="direction-header">
+      <h2>D: Card Sections</h2>
+      <p>Each content area in its own card — controls, phases, metrics, coaching. Clear visual separation with subtle shadows. Danish card-based layout.</p>
+    </div>
+    <div class="phone-frame">
+      <div class="phone-content">
+        <div class="video-placeholder">
+          <div class="skeleton-lines">
+            <div class="skeleton-figure">
+              <div class="joint head"></div>
+              <div class="joint neck"></div>
+              <div class="joint shoulder-l"></div>
+              <div class="joint shoulder-r"></div>
+              <div class="joint elbow-l"></div>
+              <div class="joint elbow-r"></div>
+              <div class="joint wrist-l"></div>
+              <div class="joint wrist-r"></div>
+              <div class="joint hip-l"></div>
+              <div class="joint hip-r"></div>
+              <div class="joint knee-l"></div>
+              <div class="joint knee-r"></div>
+              <div class="joint ankle-l"></div>
+              <div class="joint ankle-r"></div>
+            </div>
+          </div>
+          <div class="toggle-indicator">Skeleton</div>
+        </div>
+        <div class="content-cards">
+          <div class="section-card">
+            <div class="card-title">Playback</div>
+            <div class="speed-row">
+              <button class="speed-chip">0.25x</button>
+              <button class="speed-chip active">0.5x</button>
+              <button class="speed-chip">1x</button>
+            </div>
+          </div>
+          <div class="section-card">
+            <div class="card-title">Phases</div>
+            <div class="phase-bar">
+              <div class="phase-segment">Setup</div>
+              <div class="phase-segment">1st Pull</div>
+              <div class="phase-segment">Trans.</div>
+              <div class="phase-segment">2nd Pull</div>
+              <div class="phase-segment">Catch</div>
+              <div class="phase-segment">Recov.</div>
+            </div>
+          </div>
+          <div class="section-card">
+            <div class="card-title">Coaching</div>
+            <div class="coaching-section">
+              <div class="c-cue">Punch through the bar and sit your hips straight down the moment you feel the pull finish.</div>
+              <div class="c-diag">Bar pulled to sternum height but catch depth is only quarter squat. High pull forces a forward catch, causing elbow buckle at 142&deg;.</div>
+            </div>
+          </div>
+          <div class="section-card">
+            <div class="card-title">Metrics</div>
+            <div class="metrics-2col">
+              <div class="m-cell">
+                <div class="m-val">1.32</div>
+                <div class="m-lbl">Pull-to-Catch</div>
+              </div>
+              <div class="m-cell">
+                <div class="m-val">1.8 m/s</div>
+                <div class="m-lbl">Peak Velocity</div>
+              </div>
+              <div class="m-cell">
+                <div class="m-val">142&deg;</div>
+                <div class="m-lbl">Elbow at Catch</div>
+              </div>
+              <div class="m-cell">
+                <div class="m-val">0.31s</div>
+                <div class="m-lbl">2nd Pull Duration</div>
+              </div>
+              <div class="m-cell">
+                <div class="m-val">+4cm</div>
+                <div class="m-lbl">Bar Path Drift</div>
+              </div>
+              <div class="m-cell">
+                <div class="m-val">0.82s</div>
+                <div class="m-lbl">Total Lift Time</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- DIRECTION E: Minimal Float -->
+  <div class="direction dir-e">
+    <div class="direction-header">
+      <h2>E: Minimal Float</h2>
+      <p>Speed controls floating over video. Coaching cue as large hero text below. Ultra-minimal, content-forward. Maximum whitespace.</p>
+    </div>
+    <div class="phone-frame">
+      <div class="phone-content">
+        <div class="video-placeholder" style="position:relative">
+          <div class="skeleton-lines">
+            <div class="skeleton-figure">
+              <div class="joint head"></div>
+              <div class="joint neck"></div>
+              <div class="joint shoulder-l"></div>
+              <div class="joint shoulder-r"></div>
+              <div class="joint elbow-l"></div>
+              <div class="joint elbow-r"></div>
+              <div class="joint wrist-l"></div>
+              <div class="joint wrist-r"></div>
+              <div class="joint hip-l"></div>
+              <div class="joint hip-r"></div>
+              <div class="joint knee-l"></div>
+              <div class="joint knee-r"></div>
+              <div class="joint ankle-l"></div>
+              <div class="joint ankle-r"></div>
+            </div>
+          </div>
+          <div class="floating-controls">
+            <button class="float-speed">0.25x</button>
+            <button class="float-speed active">0.5x</button>
+            <button class="float-speed">1x</button>
+          </div>
+        </div>
+        <div class="minimal-content">
+          <div class="cue-hero">Punch through the bar and sit your hips straight down the moment you feel the pull finish.</div>
+          <div class="diag-sub">Bar pulled to sternum height but catch depth is only quarter squat. High pull forces a forward catch, causing elbow buckle at 142&deg;.</div>
+          <div class="phase-minimal">
+            <div class="pm-seg">Setup</div>
+            <div class="pm-seg">1st Pull</div>
+            <div class="pm-seg">Trans.</div>
+            <div class="pm-seg">2nd Pull</div>
+            <div class="pm-seg">Catch</div>
+            <div class="pm-seg">Recov.</div>
+          </div>
+          <div class="metrics-row">
+            <div class="mr-cell">
+              <div class="mr-val">1.32</div>
+              <div class="mr-lbl">Pull:Catch</div>
+            </div>
+            <div class="mr-cell">
+              <div class="mr-val">1.8</div>
+              <div class="mr-lbl">Vel m/s</div>
+            </div>
+            <div class="mr-cell">
+              <div class="mr-val">142&deg;</div>
+              <div class="mr-lbl">Elbow</div>
+            </div>
+          </div>
+          <div class="metrics-row" style="margin-top:8px">
+            <div class="mr-cell">
+              <div class="mr-val">0.31s</div>
+              <div class="mr-lbl">2nd Pull</div>
+            </div>
+            <div class="mr-cell">
+              <div class="mr-val">+4cm</div>
+              <div class="mr-lbl">Bar Drift</div>
+            </div>
+            <div class="mr-cell">
+              <div class="mr-val">0.82s</div>
+              <div class="mr-lbl">Total</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- DIRECTION F: Lift List -->
+  <div class="direction dir-f">
+    <div class="direction-header">
+      <h2>F: Lift List (All Directions)</h2>
+      <p>The lift list / home screen. Simple list with thumbnails, lift type, date. Upload button in top-right. Tap a row to open the lift detail.</p>
+    </div>
+    <div class="phone-frame">
+      <div class="phone-content">
+        <div class="list-header">
+          <div class="list-title">press-out</div>
+          <button class="upload-btn">+ Upload</button>
+        </div>
+        <div class="lift-item">
+          <div class="lift-thumb"></div>
+          <div class="lift-info">
+            <div class="lift-type">Snatch</div>
+            <div class="lift-date">Mar 15, 2026 &middot; 85kg</div>
+          </div>
+          <div class="lift-chevron">&rsaquo;</div>
+        </div>
+        <div class="lift-item">
+          <div class="lift-thumb"></div>
+          <div class="lift-info">
+            <div class="lift-type">Clean & Jerk</div>
+            <div class="lift-date">Mar 15, 2026 &middot; 105kg</div>
+          </div>
+          <div class="lift-chevron">&rsaquo;</div>
+        </div>
+        <div class="lift-item">
+          <div class="lift-thumb"></div>
+          <div class="lift-info">
+            <div class="lift-type">Snatch</div>
+            <div class="lift-date">Mar 14, 2026 &middot; 82kg</div>
+          </div>
+          <div class="lift-chevron">&rsaquo;</div>
+        </div>
+        <div class="lift-item">
+          <div class="lift-thumb"></div>
+          <div class="lift-info">
+            <div class="lift-type">Clean</div>
+            <div class="lift-date">Mar 14, 2026 &middot; 110kg</div>
+          </div>
+          <div class="lift-chevron">&rsaquo;</div>
+        </div>
+        <div class="lift-item">
+          <div class="lift-thumb"></div>
+          <div class="lift-info">
+            <div class="lift-type">Snatch</div>
+            <div class="lift-date">Mar 12, 2026 &middot; 80kg</div>
+          </div>
+          <div class="lift-chevron">&rsaquo;</div>
+        </div>
+        <div class="lift-item">
+          <div class="lift-thumb"></div>
+          <div class="lift-info">
+            <div class="lift-type">Clean & Jerk</div>
+            <div class="lift-date">Mar 12, 2026 &middot; 100kg</div>
+          </div>
+          <div class="lift-chevron">&rsaquo;</div>
+        </div>
+        <div class="lift-item">
+          <div class="lift-thumb"></div>
+          <div class="lift-info">
+            <div class="lift-type">Snatch</div>
+            <div class="lift-date">Mar 10, 2026 &middot; 78kg</div>
+          </div>
+          <div class="lift-chevron">&rsaquo;</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- DIRECTION G: Upload Screen -->
+  <div class="direction dir-g">
+    <div class="direction-header">
+      <h2>G: Upload (All Directions)</h2>
+      <p>Upload flow. Tap zone to select video, pick lift type, submit. Three interactions, done. Minimal, centered, calm.</p>
+    </div>
+    <div class="phone-frame">
+      <div class="phone-content">
+        <div class="upload-content">
+          <div class="upload-zone">
+            <div class="upload-icon">&#9655;</div>
+            <div class="upload-text">Tap to select video</div>
+            <div class="upload-sub">From camera roll</div>
+          </div>
+          <div class="lift-type-selector">
+            <div class="type-option selected">Snatch</div>
+            <div class="type-option">Clean</div>
+            <div class="type-option">C&amp;J</div>
+          </div>
+          <button class="submit-btn ready">Upload & Analyze</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- DIRECTION H: Pipeline Progress -->
+  <div class="direction dir-h">
+    <div class="direction-header">
+      <h2>H: Pipeline Progress (All Directions)</h2>
+      <p>Processing stage checklist. Completed stages checked, current pulsing, future dimmed. Result replaces this view when done. No percentage bars.</p>
+    </div>
+    <div class="phone-frame">
+      <div class="phone-content">
+        <div class="progress-content">
+          <div class="progress-title">Processing Snatch</div>
+          <div class="progress-sub">Mar 15, 2026</div>
+          <div class="stage-list">
+            <div class="stage-item stage-done">
+              <div class="stage-icon">&#10003;</div>
+              <div class="stage-name">Trimming video</div>
+              <div class="stage-time">4s</div>
+            </div>
+            <div class="stage-item stage-done">
+              <div class="stage-icon">&#10003;</div>
+              <div class="stage-name">Detecting &amp; cropping lifter</div>
+              <div class="stage-time">8s</div>
+            </div>
+            <div class="stage-item stage-done">
+              <div class="stage-icon">&#10003;</div>
+              <div class="stage-name">Running pose estimation</div>
+              <div class="stage-time">32s</div>
+            </div>
+            <div class="stage-item stage-active">
+              <div class="stage-icon">&#9679;</div>
+              <div class="stage-name">Rendering skeleton overlay</div>
+              <div class="stage-time"></div>
+            </div>
+            <div class="stage-item stage-pending">
+              <div class="stage-icon">&#9675;</div>
+              <div class="stage-name">Computing metrics</div>
+              <div class="stage-time"></div>
+            </div>
+            <div class="stage-item stage-pending">
+              <div class="stage-icon">&#9675;</div>
+              <div class="stage-name">Generating coaching</div>
+              <div class="stage-time"></div>
+            </div>
+          </div>
+          <div class="video-preview">Video preview available after skeleton render</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+</body>
+</html>
