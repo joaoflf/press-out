@@ -1,6 +1,6 @@
 TAILWINDCSS ?= npx tailwindcss
 
-.PHONY: build sqlc-generate tailwind-build go-build test run dev
+.PHONY: build sqlc-generate tailwind-build go-build test run dev setup
 
 build: sqlc-generate tailwind-build go-build
 
@@ -21,3 +21,6 @@ run:
 
 dev:
 	@echo "Run with air for hot-reload: air"
+
+setup:
+	npm ci

@@ -4,8 +4,7 @@
 # Data directory
 data/
 
-# Tailwind compiled output
-web/static/output.css
+# Tailwind compiled output (committed for CI — rebuild with: make tailwind-build)
 
 # Environment
 .env
