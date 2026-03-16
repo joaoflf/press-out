@@ -12,10 +12,7 @@
     {{else}}
     <div class="space-y-3 mb-4">
         {{range .Lifts}}
-        <a href="/lifts/{{.ID}}" class="block p-3 rounded-lg bg-neutral">
-            <span class="font-medium">{{.LiftType}}</span>
-            <span class="text-sm text-base-content/60 ml-2">{{.CreatedAt}}</span>
-        </a>
+        {{template "lift-list-item" .}}
         {{end}}
     </div>
     {{end}}

@@ -33,4 +33,7 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 
 	// Static files
 	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.Dir("web/static"))))
+
+	// Lift data files (thumbnails, videos)
+	mux.Handle("GET /data/", http.StripPrefix("/data/", http.FileServer(http.Dir(s.DataDir))))
 }

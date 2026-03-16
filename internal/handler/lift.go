@@ -22,9 +22,12 @@ type LiftListData struct {
 
 // LiftItem represents a lift in the list view.
 type LiftItem struct {
-	ID        int64
-	LiftType  string
-	CreatedAt string
+	ID           int64
+	LiftType     string
+	CreatedAt    string
+	DisplayType  string
+	DisplayDate  string
+	HasThumbnail bool
 }
 
 // HandleListLifts renders the lift list page at GET /.
@@ -40,10 +43,15 @@ func (s *Server) HandleListLifts(w http.ResponseWriter, r *http.Request) {
 		Empty: len(lifts) == 0,
 	}
 	for _, l := range lifts {
+		thumbPath := storage.LiftFile(s.DataDir, l.ID, storage.FileThumbnail)
+		_, thumbErr := os.Stat(thumbPath)
 		data.Lifts = append(data.Lifts, LiftItem{
-			ID:        l.ID,
-			LiftType:  l.LiftType,
-			CreatedAt: l.CreatedAt,
+			ID:           l.ID,
+			LiftType:     l.LiftType,
+			CreatedAt:    l.CreatedAt,
+			DisplayType:  formatLiftType(l.LiftType),
+			DisplayDate:  formatDate(l.CreatedAt),
+			HasThumbnail: thumbErr == nil,
 		})
 	}
 
@@ -129,6 +137,29 @@ func isValidVideo(filename, contentType string) bool {
 	}
 	mt, _, _ := mime.ParseMediaType(contentType)
 	return mt == "video/mp4" || mt == "video/quicktime"
+}
+
+// formatLiftType returns a human-readable lift type label.
+func formatLiftType(lt string) string {
+	switch lt {
+	case "snatch":
+		return "Snatch"
+	case "clean":
+		return "Clean"
+	case "clean_and_jerk":
+		return "Clean & Jerk"
+	default:
+		return lt
+	}
+}
+
+// formatDate converts an RFC3339 timestamp to a human-readable date.
+func formatDate(rfc3339 string) string {
+	t, err := time.Parse(time.RFC3339, rfc3339)
+	if err != nil {
+		return rfc3339
+	}
+	return t.Format("Jan 2, 2006")
 }
 
 // HandleGetLift handles GET /lifts/{id} (stub for Story 1.3).
