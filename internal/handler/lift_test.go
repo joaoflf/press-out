@@ -607,6 +607,201 @@ func TestHandleGetLift_PlaceholderSections(t *testing.T) {
 	}
 }
 
+// --- Story 1.5: Delete Lift tests ---
+
+func TestHandleDeleteLift_RemovesDBRecord(t *testing.T) {
+	srv := setupTestServer(t)
+
+	lift, err := srv.Queries.CreateLift(context.Background(), sqlc.CreateLiftParams{
+		LiftType:  "snatch",
+		CreatedAt: "2026-01-01T00:00:00Z",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Create lift directory with files
+	if err := storage.CreateLiftDir(srv.DataDir, lift.ID); err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile(storage.LiftFile(srv.DataDir, lift.ID, storage.FileOriginal), []byte("video"), 0644)
+
+	mux := http.NewServeMux()
+	srv.RegisterRoutes(mux)
+
+	req := httptest.NewRequest("DELETE", fmt.Sprintf("/lifts/%d", lift.ID), nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Verify HX-Redirect header
+	if redirect := w.Header().Get("HX-Redirect"); redirect != "/" {
+		t.Errorf("HX-Redirect=%q, want %q", redirect, "/")
+	}
+
+	// Verify DB record is gone
+	_, err = srv.Queries.GetLift(context.Background(), lift.ID)
+	if err == nil {
+		t.Error("expected lift to be deleted from DB")
+	}
+}
+
+func TestHandleDeleteLift_RemovesFiles(t *testing.T) {
+	srv := setupTestServer(t)
+
+	lift, err := srv.Queries.CreateLift(context.Background(), sqlc.CreateLiftParams{
+		LiftType:  "clean",
+		CreatedAt: "2026-01-01T00:00:00Z",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Create lift directory with multiple files
+	if err := storage.CreateLiftDir(srv.DataDir, lift.ID); err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range []string{storage.FileOriginal, storage.FileTrimmed, storage.FileThumbnail, storage.FileKeypoints} {
+		os.WriteFile(storage.LiftFile(srv.DataDir, lift.ID, f), []byte("data"), 0644)
+	}
+
+	mux := http.NewServeMux()
+	srv.RegisterRoutes(mux)
+
+	req := httptest.NewRequest("DELETE", fmt.Sprintf("/lifts/%d", lift.ID), nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+
+	// Verify directory is gone
+	liftDir := storage.LiftDir(srv.DataDir, lift.ID)
+	if _, err := os.Stat(liftDir); !os.IsNotExist(err) {
+		t.Error("expected lift directory to be removed")
+	}
+}
+
+func TestHandleDeleteLift_InvalidID(t *testing.T) {
+	srv := setupTestServer(t)
+	mux := http.NewServeMux()
+	srv.RegisterRoutes(mux)
+
+	req := httptest.NewRequest("DELETE", "/lifts/999", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("expected 404, got %d", w.Code)
+	}
+}
+
+func TestHandleDeleteLift_NonNumericID(t *testing.T) {
+	srv := setupTestServer(t)
+	mux := http.NewServeMux()
+	srv.RegisterRoutes(mux)
+
+	req := httptest.NewRequest("DELETE", "/lifts/abc", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("expected 404, got %d", w.Code)
+	}
+}
+
+func TestHandleDeleteLift_AbsentFromList(t *testing.T) {
+	srv := setupTestServer(t)
+
+	// Create two lifts
+	lift1, _ := srv.Queries.CreateLift(context.Background(), sqlc.CreateLiftParams{
+		LiftType:  "snatch",
+		CreatedAt: "2026-01-01T00:00:00Z",
+	})
+	srv.Queries.CreateLift(context.Background(), sqlc.CreateLiftParams{
+		LiftType:  "clean",
+		CreatedAt: "2026-02-01T00:00:00Z",
+	})
+
+	storage.CreateLiftDir(srv.DataDir, lift1.ID)
+	os.WriteFile(storage.LiftFile(srv.DataDir, lift1.ID, storage.FileOriginal), []byte("v"), 0644)
+
+	mux := http.NewServeMux()
+	srv.RegisterRoutes(mux)
+
+	// Delete lift1
+	req := httptest.NewRequest("DELETE", fmt.Sprintf("/lifts/%d", lift1.ID), nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("delete: expected 200, got %d", w.Code)
+	}
+
+	// Now list lifts — deleted lift should be absent
+	req = httptest.NewRequest("GET", "/", nil)
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	body := w.Body.String()
+	if !strings.Contains(body, "Clean") {
+		t.Error("expected remaining lift 'Clean' in list")
+	}
+	// The deleted snatch lift should not appear. Check that there's only one lift link.
+	lifts, _ := srv.Queries.ListLifts(context.Background())
+	if len(lifts) != 1 {
+		t.Errorf("expected 1 lift remaining, got %d", len(lifts))
+	}
+	if lifts[0].LiftType != "clean" {
+		t.Errorf("expected remaining lift to be 'clean', got %q", lifts[0].LiftType)
+	}
+}
+
+func TestHandleDeleteLift_NoOrphanedFiles(t *testing.T) {
+	srv := setupTestServer(t)
+
+	lift, err := srv.Queries.CreateLift(context.Background(), sqlc.CreateLiftParams{
+		LiftType:  "clean_and_jerk",
+		CreatedAt: "2026-01-01T00:00:00Z",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Create all possible files
+	if err := storage.CreateLiftDir(srv.DataDir, lift.ID); err != nil {
+		t.Fatal(err)
+	}
+	allFiles := []string{
+		storage.FileOriginal, storage.FileTrimmed, storage.FileCropped,
+		storage.FileSkeleton, storage.FileThumbnail, storage.FileKeypoints,
+	}
+	for _, f := range allFiles {
+		os.WriteFile(storage.LiftFile(srv.DataDir, lift.ID, f), []byte("data"), 0644)
+	}
+
+	mux := http.NewServeMux()
+	srv.RegisterRoutes(mux)
+
+	req := httptest.NewRequest("DELETE", fmt.Sprintf("/lifts/%d", lift.ID), nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+
+	// Verify no orphaned files
+	liftDir := storage.LiftDir(srv.DataDir, lift.ID)
+	if _, err := os.Stat(liftDir); !os.IsNotExist(err) {
+		t.Error("lift directory still exists — orphaned files remain")
+	}
+}
+
 func TestIsValidVideo(t *testing.T) {
 	tests := []struct {
 		filename    string

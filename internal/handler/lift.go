@@ -215,9 +215,38 @@ func bestVideoFile(dataDir string, liftID int64) string {
 	return storage.FileOriginal
 }
 
-// HandleDeleteLift handles DELETE /lifts/{id} (stub for later stories).
+// HandleDeleteLift handles DELETE /lifts/{id} — removes lift record and files.
 func (s *Server) HandleDeleteLift(w http.ResponseWriter, r *http.Request) {
-	http.Error(w, "Not Implemented", http.StatusNotImplemented)
+	idStr := r.PathValue("id")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		http.Error(w, "Not Found", http.StatusNotFound)
+		return
+	}
+
+	// Verify lift exists before deleting.
+	if _, err := s.Queries.GetLift(r.Context(), id); err != nil {
+		http.Error(w, "Not Found", http.StatusNotFound)
+		return
+	}
+
+	// Delete DB record first.
+	if err := s.Queries.DeleteLift(r.Context(), id); err != nil {
+		slog.Error("failed to delete lift record", "id", id, "error", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+
+	// Remove lift directory and all files. Log but don't fail if removal errors.
+	if err := storage.RemoveLiftDir(s.DataDir, id); err != nil {
+		slog.Error("failed to remove lift directory", "id", id, "error", err)
+	}
+
+	slog.Info("lift deleted", "id", id)
+
+	// HTMX redirect via header.
+	w.Header().Set("HX-Redirect", "/")
+	w.WriteHeader(http.StatusOK)
 }
 
 // HandleLiftEvents handles GET /lifts/{id}/events SSE (stub for later stories).
