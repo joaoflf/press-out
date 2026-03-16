@@ -303,6 +303,51 @@ func TestLiftDetail_PlaceholderSections(t *testing.T) {
 	}
 }
 
+func TestLiftDetail_VideoHeightConstrained(t *testing.T) {
+	env := startTestEnv(t)
+	liftID := createTestLift(t, env, "snatch", "2026-01-01T00:00:00Z")
+
+	ctx, _ := newBrowserCtx(t)
+
+	// Set mobile viewport (375x812 typical iPhone)
+	var videoHeight, viewportHeight float64
+	var contentVisible bool
+	err := chromedp.Run(ctx,
+		chromedp.EmulateViewport(375, 812),
+		chromedp.Navigate(fmt.Sprintf("%s/lifts/%d", env.BaseURL, liftID)),
+		chromedp.WaitReady("body"),
+		chromedp.Evaluate(`
+			(function() {
+				var video = document.querySelector('video');
+				if (!video) return 0;
+				var rect = video.getBoundingClientRect();
+				return rect.height;
+			})()
+		`, &videoHeight),
+		chromedp.Evaluate(`window.innerHeight`, &viewportHeight),
+		// Check that content below the video is visible in the viewport
+		chromedp.Evaluate(`
+			(function() {
+				var back = document.querySelector('a[aria-label="Back to lift list"]');
+				if (!back) return false;
+				var rect = back.getBoundingClientRect();
+				return rect.top < window.innerHeight;
+			})()
+		`, &contentVisible),
+	)
+	if err != nil {
+		t.Fatalf("chromedp: %v", err)
+	}
+
+	maxAllowed := viewportHeight * 0.55 // 50vh + small tolerance
+	if videoHeight > maxAllowed {
+		t.Errorf("video height=%.0fpx exceeds 50vh (%.0fpx max for viewport %.0fpx)", videoHeight, maxAllowed, viewportHeight)
+	}
+	if !contentVisible {
+		t.Error("back button / content below video is not visible in viewport")
+	}
+}
+
 func TestLiftDetail_CSSAndScriptsLoad(t *testing.T) {
 	env := startTestEnv(t)
 	liftID := createTestLift(t, env, "snatch", "2026-01-01T00:00:00Z")
