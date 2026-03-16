@@ -102,6 +102,29 @@ This document provides the complete epic and story breakdown for press-out, deco
 - UX-DR17: Skeleton video auto-plays on detail load — skeleton overlay is the default view, not clean video. No tap required to see primary analysis
 - UX-DR18: No error states in UI vocabulary — degraded results presented identically to full results. If a metric couldn't be computed, it's absent, not "N/A" or "Error"
 
+### Cross-Cutting Testing Requirement: ChromeDP Browser Verification
+
+Every story that produces or modifies HTML pages or partials **must** include ChromeDP headless browser verification tests. These tests ensure that the rendered pages are fully functional in a real browser environment.
+
+**Required checks for every UI story:**
+1. **Asset loading:** `output.css`, HTMX script, and `app.js` load without 404 or network errors
+2. **DaisyUI theme:** `<html data-theme="press-out">` attribute is present and active
+3. **No console errors:** No JavaScript errors on page load
+4. **Page-specific element verification:** Key visual elements render with correct content, classes, and structure (defined per story)
+
+**Test pattern:**
+- Start the server on a random test port with a test database and test data
+- Run ChromeDP against the running server
+- Assert asset loading, theme, console errors, and page-specific elements
+- Tear down server and test data after
+
+**Stories requiring ChromeDP verification:**
+- Epic 1: Stories 1.1, 1.2, 1.3, 1.4, 1.5 (all have UI)
+- Epic 2: Stories 2.1 (pipeline progress UI), 2.5 (progressive video availability)
+- Epic 3: Story 3.3 (video player with toggle & speed controls)
+- Epic 4: Stories 4.3 (phase timeline), 4.4 (metrics display grid)
+- Epic 5: Story 5.2 (coaching card display)
+
 ### FR Coverage Map
 
 - FR1: Epic 1 - Video upload from mobile device

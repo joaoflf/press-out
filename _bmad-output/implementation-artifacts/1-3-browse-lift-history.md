@@ -46,6 +46,20 @@ so that I can find and review any previous lift.
   - [ ] Test lift list item renders lift type and date correctly
   - [ ] Test thumbnail is shown when file exists
 
+- [ ] Write ChromeDP browser verification tests (AC: 1, 2)
+  - [ ] Start the server on a random test port, run ChromeDP against it, tear down after
+  - [ ] Verify `output.css` loads successfully (no 404/network errors)
+  - [ ] Verify HTMX script loads successfully (no 404/network errors)
+  - [ ] Verify `app.js` loads successfully (no 404/network errors)
+  - [ ] Verify DaisyUI theme is active: `<html data-theme="press-out">` attribute is present
+  - [ ] Verify no JavaScript console errors on page load
+  - [ ] Verify lift list items render with correct lift type text ("Snatch", "Clean", or "Clean & Jerk")
+  - [ ] Verify lift list items display formatted dates
+  - [ ] Verify each lift row is a tappable link (anchor element wrapping content)
+  - [ ] Verify thumbnail image element is present when thumbnail file exists
+  - [ ] Verify empty state message renders when no lifts exist
+  - [ ] Verify upload button is visible and has sage accent styling (#8BA888)
+
 ## Dev Notes
 
 - Lift list items have two visual states: normal (with thumbnail) and processing (with compact pipeline indicator). This story implements the normal state. The processing state will be completed in Story 2.1.

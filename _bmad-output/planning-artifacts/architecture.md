@@ -123,7 +123,16 @@ go mod init press-out
 **Testing Framework:**
 - Go standard `testing` package
 - `net/http/httptest` for HTTP handler testing
-- Chromedp for headless browser E2E tests (per brainstorming build plan)
+- ChromeDP (`github.com/chromedp/chromedp`) for headless browser verification tests
+
+**ChromeDP Browser Verification (Required for all stories with UI output):**
+- Every story that produces or modifies HTML pages/partials must include ChromeDP tests
+- Test setup: start the server on a random test port, run ChromeDP against it, tear down after
+- **Asset verification:** Confirm `output.css`, HTMX script, `app.js` all load successfully (no 404/network errors)
+- **Theme verification:** Confirm DaisyUI theme is active (`<html data-theme="press-out">` attribute present)
+- **Console verification:** Confirm no JavaScript console errors on page load
+- **Visual element verification:** Confirm page-specific elements render with correct content, classes, and structure
+- ChromeDP tests are co-located with handler tests (e.g., `internal/handler/lift_chromedp_test.go`)
 
 **Code Organization:**
 - Flat or shallow package structure following Go conventions
@@ -427,6 +436,7 @@ type Stage interface {
 - Follow the naming conventions above — check existing code for precedent before introducing new names
 - Return errors from stages, never panic or fatal — the orchestrator handles all error recovery
 - Log with `slog` using the standard attribute keys — no `fmt.Println` or `log.Printf`
+- Include ChromeDP browser verification tests for any story that produces or modifies UI pages — verifying asset loading, DaisyUI theme, no console errors, and page-specific visual elements
 
 ### Pattern Examples
 

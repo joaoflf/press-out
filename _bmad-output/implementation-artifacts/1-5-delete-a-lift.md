@@ -41,6 +41,19 @@ so that my lift list stays clean and relevant.
   - [ ] Test that after deletion, GET / does not include the deleted lift
   - [ ] Test no orphaned files remain after deletion
 
+- [ ] Write ChromeDP browser verification tests (AC: 1, 2)
+  - [ ] Start the server on a random test port, run ChromeDP against it, tear down after
+  - [ ] Verify `output.css` loads successfully (no 404/network errors)
+  - [ ] Verify HTMX script loads successfully (no 404/network errors)
+  - [ ] Verify `app.js` loads successfully (no 404/network errors)
+  - [ ] Verify DaisyUI theme is active: `<html data-theme="press-out">` attribute is present
+  - [ ] Verify no JavaScript console errors on page load
+  - [ ] Verify delete button is present on the lift detail page
+  - [ ] Verify delete button is not primary tier styling (avoids accidental taps)
+  - [ ] Verify `hx-confirm` or equivalent confirmation dialog is triggered on delete action
+  - [ ] Verify that after deletion, the browser redirects to the lift list page
+  - [ ] Verify the deleted lift no longer appears in the lift list
+
 ## Dev Notes
 
 - Deletion is a destructive operation. Use HTMX `hx-confirm` to show a browser confirmation dialog before proceeding.

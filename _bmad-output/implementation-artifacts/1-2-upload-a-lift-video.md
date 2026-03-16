@@ -1,6 +1,6 @@
 # Story 1.2: Upload a Lift Video
 
-Status: ready-for-dev
+Status: done
 
 ## Story
 

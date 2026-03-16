@@ -52,6 +52,20 @@ so that I can review what I recorded.
   - [ ] Test that video source points to correct file
   - [ ] Test back button link points to /
 
+- [ ] Write ChromeDP browser verification tests (AC: 1, 2, 3)
+  - [ ] Start the server on a random test port, run ChromeDP against it, tear down after
+  - [ ] Verify `output.css` loads successfully (no 404/network errors)
+  - [ ] Verify HTMX script loads successfully (no 404/network errors)
+  - [ ] Verify `app.js` loads successfully (no 404/network errors)
+  - [ ] Verify DaisyUI theme is active: `<html data-theme="press-out">` attribute is present
+  - [ ] Verify no JavaScript console errors on page load
+  - [ ] Verify lift type and date are displayed on the detail page
+  - [ ] Verify video player element is present with correct `src` attribute pointing to the best available video
+  - [ ] Verify video element has `playsinline` and `preload="metadata"` attributes
+  - [ ] Verify video player container is full-width edge-to-edge (no horizontal padding)
+  - [ ] Verify back button is present, links to `/`, and has 44px touch target styling
+  - [ ] Verify placeholder sections exist for future content (coaching, phase timeline, metrics)
+
 ## Dev Notes
 
 - The video player at this stage is a basic HTML5 video element showing the clean (original) video. Toggle and speed controls are added in Story 3.3.
