@@ -1,0 +1,38 @@
+# Binary (root level only)
+/press-out
+
+# Data directory
+data/
+
+# Tailwind compiled output
+web/static/output.css
+
+# Environment
+.env
+
+# SQLite databases
+*.db
+
+# Node (tailwind/daisyui build deps)
+node_modules/
+
+# OS
+.DS_Store
+
+# IDE
+.idea/
+.vscode/
+
+# Gas Town runtime
+.runtime/
+.claude/
+.logs/
+__pycache__/
+state.json
+
+# BMAD artifacts (not part of app)
+_bmad/
+_bmad-output/
+
+# Beads
+.beads/

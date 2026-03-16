@@ -1,0 +1,25 @@
+{{template "base.html" .}}
+
+{{define "content"}}
+<div class="max-w-[430px] mx-auto p-4">
+    <h1 class="text-xl font-semibold mb-6">press-out</h1>
+
+    {{if .Empty}}
+    <div class="text-center py-12">
+        <p class="text-base-content/60 mb-2">No lifts yet</p>
+        <p class="text-sm text-base-content/40">Upload a video to get started</p>
+    </div>
+    {{else}}
+    <div class="space-y-3 mb-4">
+        {{range .Lifts}}
+        <a href="/lifts/{{.ID}}" class="block p-3 rounded-lg bg-neutral">
+            <span class="font-medium">{{.LiftType}}</span>
+            <span class="text-sm text-base-content/60 ml-2">{{.CreatedAt}}</span>
+        </a>
+        {{end}}
+    </div>
+    {{end}}
+
+    <a href="#" class="btn btn-primary w-full h-12 text-white">Upload Lift</a>
+</div>
+{{end}}
