@@ -381,6 +381,7 @@ internal/pipeline/stages/coaching.go -- coaching stage (Claude Code)
 internal/storage/storage.go        -- file storage operations
 internal/storage/db.go             -- database operations
 internal/sse/broker.go             -- SSE event broker
+internal/ffmpeg/ffmpeg.go          -- FFmpeg/ffprobe subprocess helper
 internal/mediapipe/client.go       -- MediaPipe API client
 internal/claude/runner.go          -- Claude Code subprocess runner
 ```
