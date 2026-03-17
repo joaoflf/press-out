@@ -51,9 +51,9 @@ This document provides the complete epic and story breakdown for press-out, deco
 - NFR3: Video playback begins within 1 second of user interaction, as measured by browser performance timing API
 - NFR4: Toggle between clean and skeleton overlay video switches playback within 500 milliseconds, as measured by browser performance timing API
 - NFR5: Pipeline stage progress updates reach the browser within 1 second of each stage completing, as measured by server-side SSE dispatch timestamps
-- NFR6: System handles MediaPipe API unavailability gracefully, reporting the failure without crashing the pipeline
+- NFR6: System handles Video Intelligence API unavailability gracefully, reporting the failure without crashing the pipeline
 - NFR7: System handles LLM API unavailability gracefully, completing video processing without coaching feedback or phase segmentation
-- NFR8: System operates with no external infrastructure dependencies beyond MediaPipe and LLM APIs
+- NFR8: System operates with no external infrastructure dependencies beyond Video Intelligence and LLM APIs
 - NFR9: No user-facing error screens during video processing — all failures degrade to the best available result
 - NFR10: Uploaded videos are persisted before processing begins, ensuring no data loss if processing fails
 - NFR11: A failed pipeline run can be re-triggered on a previously uploaded video without re-uploading
@@ -73,12 +73,12 @@ This document provides the complete epic and story breakdown for press-out, deco
 - Graceful degradation: Pipeline errors logged server-side, stage marked skipped, pipeline continues with last successful input; no error state in data model
 - FFmpeg system dependency: Required for video trim, crop, skeleton rendering, and thumbnail extraction via `exec.Command`
 - Pipeline Stage interface: All stages implement `Stage` interface with `Name()` and `Run(ctx, StageInput) (StageOutput, error)`
-- Package organization: `cmd/press-out/`, `internal/` (handler, pipeline, storage, sse, mediapipe, claude), `sql/`, `web/`
-- Configuration: Environment variables with defaults (PORT=8080, DATA_DIR=./data, DB_PATH=./data/press-out.db, MEDIAPIPE_API_KEY required)
+- Package organization: `cmd/press-out/`, `internal/` (handler, pipeline, storage, sse, pose, claude), `sql/`, `web/`
+- Configuration: Environment variables with defaults (PORT=8080, DATA_DIR=./data, DB_PATH=./data/press-out.db, GOOGLE_APPLICATION_CREDENTIALS required)
 - Deployment: Makefile-driven (build, test, run), systemd process management, single VPS
 - Logging: Go slog to stdout, structured JSON, captured by systemd journal
 - Build tooling: `go build` + Tailwind standalone CLI + sqlc generate, no npm/node, no JavaScript build step
-- External integrations: MediaPipe via HTTP API client, Claude Code via headless subprocess runner
+- External integrations: Google Cloud Video Intelligence via Go client library, Claude Code via headless subprocess runner
 - Thumbnail generation: Extracted from processed video via FFmpeg, stored as `thumbnail.jpg` in lift directory
 
 ### UX Design Requirements
@@ -395,7 +395,7 @@ So that I can review the lift immediately without scrubbing through setup footag
 **And** the stage returns an error to the orchestrator
 **And** the orchestrator skips the stage and passes the original video forward (FR7)
 
-### Story 2.4: Pose Estimation via MediaPipe
+### Story 2.4: Pose Estimation via Video Intelligence API
 
 As a lifter,
 I want the system to detect my body positions from the video,
@@ -405,11 +405,11 @@ So that my joint movements can be used for cropping, visualization, and analysis
 
 **Given** the pipeline reaches the pose estimation stage with a trimmed (or original) video
 **When** the pose stage runs
-**Then** the system sends video frames to the MediaPipe API via the HTTP client
+**Then** the system sends video to the Google Cloud Video Intelligence API via the Go client library
 **And** keypoint coordinates (joints, limbs) are received for each frame (FR8)
 **And** the keypoint data is saved as keypoints.json in the lift-ID directory
 
-**Given** the MediaPipe API is unavailable or returns an error
+**Given** the Video Intelligence API is unavailable or returns an error
 **When** the pose stage attempts to connect
 **Then** the error is logged with slog (lift_id, stage, error attributes)
 **And** the stage returns an error to the orchestrator

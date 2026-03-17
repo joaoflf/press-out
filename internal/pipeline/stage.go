@@ -55,8 +55,8 @@ func (s *StubStage) Run(_ context.Context, input StageInput) (StageOutput, error
 func DefaultStages() []Stage {
 	return []Stage{
 		&StubStage{StageName: StageTrimming},
-		&StubStage{StageName: StageCropping},
 		&StubStage{StageName: StagePoseEstimation},
+		&StubStage{StageName: StageCropping},
 		&StubStage{StageName: StageRenderingSkeleton},
 		&StubStage{StageName: StageComputingMetrics},
 		&StubStage{StageName: StageGeneratingCoaching},

@@ -120,6 +120,45 @@ func GetDuration(ctx context.Context, input string) (float64, error) {
 	return d, nil
 }
 
+// GetDimensions returns the width and height of the input video via ffprobe.
+func GetDimensions(ctx context.Context, input string) (width, height int, err error) {
+	stdout, _, err := RunProbe(ctx,
+		"-v", "error",
+		"-select_streams", "v:0",
+		"-show_entries", "stream=width,height",
+		"-of", "default=noprint_wrappers=1",
+		input,
+	)
+	if err != nil {
+		return 0, 0, err
+	}
+
+	// Output format: "width=1920\nheight=1080\n"
+	var w, h int
+	for _, line := range strings.Split(strings.TrimSpace(string(stdout)), "\n") {
+		parts := strings.SplitN(line, "=", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		switch parts[0] {
+		case "width":
+			w, err = strconv.Atoi(parts[1])
+			if err != nil {
+				return 0, 0, fmt.Errorf("failed to parse width %q: %w", parts[1], err)
+			}
+		case "height":
+			h, err = strconv.Atoi(parts[1])
+			if err != nil {
+				return 0, 0, fmt.Errorf("failed to parse height %q: %w", parts[1], err)
+			}
+		}
+	}
+	if w == 0 || h == 0 {
+		return 0, 0, fmt.Errorf("failed to parse dimensions from %q", string(stdout))
+	}
+	return w, h, nil
+}
+
 func formatSeconds(sec float64) string {
 	return strconv.FormatFloat(sec, 'f', 3, 64)
 }

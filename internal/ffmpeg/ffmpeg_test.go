@@ -164,3 +164,22 @@ func TestGetDuration(t *testing.T) {
 	}
 	t.Logf("duration: %fs", dur)
 }
+
+func TestGetDimensions(t *testing.T) {
+	skipIfNoFFprobe(t)
+
+	path := filepath.Join("..", "..", "testdata", "videos", "sample-lift.mp4")
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		t.Skipf("sample-lift video not found at %s", path)
+	}
+
+	ctx := context.Background()
+	w, h, err := GetDimensions(ctx, path)
+	if err != nil {
+		t.Fatalf("GetDimensions failed: %v", err)
+	}
+	if w <= 0 || h <= 0 {
+		t.Fatalf("expected positive dimensions, got %dx%d", w, h)
+	}
+	t.Logf("dimensions: %dx%d", w, h)
+}
