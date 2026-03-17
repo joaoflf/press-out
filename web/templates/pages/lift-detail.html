@@ -17,6 +17,12 @@
             </div>
         </div>
 
+        {{if .Processing}}
+        <div hx-ext="sse" sse-connect="/lifts/{{.ID}}/events" sse-close="pipeline-done">
+            {{template "pipeline-stages" .}}
+        </div>
+        {{end}}
+
         <div id="coaching-section"></div>
 
         <div id="phase-timeline-section"></div>

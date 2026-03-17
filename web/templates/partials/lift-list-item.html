@@ -1,4 +1,21 @@
 {{define "lift-list-item"}}
+{{if .Processing}}
+<div hx-ext="sse" sse-connect="/lifts/{{.ID}}/events" sse-close="pipeline-done">
+    <a href="/lifts/{{.ID}}" class="flex items-center gap-3 p-3 rounded-lg bg-neutral min-h-[56px]">
+        <div class="w-12 h-12 rounded bg-primary/10 flex items-center justify-center flex-shrink-0">
+            <span class="loading loading-spinner loading-sm text-primary"></span>
+        </div>
+        <div class="flex-1 min-w-0">
+            <div class="font-medium">{{.DisplayType}}</div>
+            <div sse-swap="pipeline-status" hx-swap="innerHTML">
+                <div class="flex items-center gap-1.5">
+                    <span class="text-xs text-base-content/40">Processing...</span>
+                </div>
+            </div>
+        </div>
+    </a>
+</div>
+{{else}}
 <a href="/lifts/{{.ID}}" class="flex items-center gap-3 p-3 rounded-lg bg-neutral min-h-[56px]">
     {{if .HasThumbnail}}
     <img src="/data/lifts/{{.ID}}/thumbnail.jpg" alt="" class="w-12 h-12 rounded object-cover flex-shrink-0">
@@ -14,4 +31,5 @@
         <div class="text-sm text-base-content/60">{{.DisplayDate}}</div>
     </div>
 </a>
+{{end}}
 {{end}}

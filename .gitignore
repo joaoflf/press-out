@@ -31,7 +31,6 @@ state.json
 
 # BMAD artifacts (not part of app)
 _bmad/
-_bmad-output/
 
 # Beads
 .beads/

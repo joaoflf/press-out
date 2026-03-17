@@ -9,6 +9,8 @@ import (
 
 	"press-out/internal/config"
 	"press-out/internal/handler"
+	"press-out/internal/pipeline"
+	"press-out/internal/sse"
 	"press-out/internal/storage"
 	"press-out/internal/storage/sqlc"
 )
@@ -73,10 +75,15 @@ func main() {
 		}
 	}
 
+	broker := sse.NewBroker()
+	pl := pipeline.New(pipeline.DefaultStages(), broker)
+
 	srv := &handler.Server{
 		Queries:   queries,
 		Templates: tmplMap,
 		DataDir:   cfg.DataDir,
+		Pipeline:  pl,
+		Broker:    broker,
 	}
 
 	mux := http.NewServeMux()
