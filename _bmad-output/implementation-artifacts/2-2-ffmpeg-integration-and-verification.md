@@ -47,10 +47,9 @@ so that all video processing stages can reliably invoke FFmpeg.
   - [ ] Call `ffmpeg.Probe()` at startup, after config load
   - [ ] Log result — do not exit on failure
 
-- [ ] Add test video file `testdata/videos/sample.mp4` (AC: 3)
-  - [ ] Generate a minimal valid MP4 file via FFmpeg: `ffmpeg -f lavfi -i testsrc=duration=2:size=320x240:rate=24 -c:v libx264 -pix_fmt yuv420p testdata/videos/sample.mp4`
-  - [ ] 2-second synthetic video, small file size, sufficient for integration tests
-  - [ ] Commit to repo so tests can run without external fixtures
+- [ ] Add test video files to `testdata/videos/` (AC: 3)
+  - [ ] `sample-lift.mp4` — real snatch video (~27MB, single lifter, lift at ~6-11s) already committed to the repo. Use for integration tests that need realistic motion
+  - [ ] `sample.mp4` — generate a minimal synthetic MP4 via FFmpeg: `ffmpeg -f lavfi -i testsrc=duration=2:size=320x240:rate=24 -c:v libx264 -pix_fmt yuv420p testdata/videos/sample.mp4`. Use for basic FFmpeg helper tests (trim, crop, thumbnail, duration)
 
 - [ ] Write unit tests `internal/ffmpeg/ffmpeg_test.go` (AC: 2, 3)
   - [ ] Test `Run()` with a simple FFmpeg command (e.g., `-version`)

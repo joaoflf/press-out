@@ -450,7 +450,7 @@ func (t *TrimStage) Run(ctx context.Context, input StageInput) (StageOutput, err
         return StageOutput{}, fmt.Errorf("trim: %w", err)
     }
     slog.Info("stage complete", "lift_id", input.LiftID, "stage", t.Name(), "duration_ms", elapsed)
-    return StageOutput{VideoPath: storage.LiftFile(input.LiftID, storage.FileTrimmed)}, nil
+    return StageOutput{VideoPath: storage.LiftFile(input.DataDir, input.LiftID, storage.FileTrimmed)}, nil
 }
 ```
 
