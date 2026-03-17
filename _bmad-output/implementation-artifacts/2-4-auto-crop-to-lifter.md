@@ -54,12 +54,14 @@ so that I see only my lift without distracting bystanders or background.
   - [ ] In `main.go`, add `&stages.CropStage{}` as the second stage in the pipeline's stage slice (after TrimStage)
 
 - [ ] Write unit tests `internal/pipeline/stages/crop_test.go` (AC: 1, 2, 3)
-  - [ ] Test crop on `testdata/videos/sample.mp4` — produces `cropped.mp4`
-  - [ ] Test thumbnail extraction — produces `thumbnail.jpg`
+  - [ ] Test `CropStage.Name()` returns exactly `"Cropping"` (must match `StageCropping` constant from Story 2.1)
+  - [ ] Test crop on `testdata/videos/sample-lift.mp4` (real snatch video, single lifter, lift at ~6-11s) — produces `cropped.mp4` and `thumbnail.jpg`
+  - [ ] Test thumbnail extraction — produces `thumbnail.jpg`, verify it is a valid JPEG
   - [ ] Test low-confidence scenario — returns input video path, still extracts thumbnail
   - [ ] Test FFmpeg failure — returns error (not panic)
   - [ ] Test thumbnail extraction failure — stage still succeeds, no thumbnail file
-  - [ ] Tests skip if FFmpeg is not installed
+  - [ ] Test with context cancellation — returns error
+  - [ ] Tests skip if FFmpeg is not installed (`t.Skip("ffmpeg not available")`)
 
 ## Dev Notes
 
