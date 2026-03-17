@@ -24,7 +24,7 @@ _This document builds collaboratively through step-by-step discovery. Sections a
 
 - **Video Upload & Storage (FR1-3):** File upload, persistent storage, manual lift type assignment. Straightforward — the entry point to the pipeline.
 - **Video Processing (FR4-7):** Auto-trim (motion detection), auto-crop (person-barbell interaction), independent stage skipping, graceful degradation. This is where architectural complexity lives — each stage must be independently bypassable, and failure at any point passes input through unchanged.
-- **Pose Estimation & Visualization (FR8-10):** Keypoint detection from video frames, skeleton overlay rendering, dual pre-rendered video output. Heavy compute — calls external MediaPipe API, then renders overlays frame-by-frame server-side.
+- **Pose Estimation & Visualization (FR8-10):** Keypoint detection from video frames, skeleton overlay rendering, dual pre-rendered video output. Heavy compute — calls Google Cloud Video Intelligence API, then renders overlays frame-by-frame server-side.
 - **Lift Metrics & Phase Analysis (FR11-18):** Six metrics computed from keypoint data (pull-to-catch ratio, bar path, velocity curve, joint angles, phase durations, key position snapshots), LLM-based phase segmentation with timeline markers. Computation layer that transforms raw keypoints into structured analysis.
 - **Coaching Intelligence (FR19-21):** LLM-generated diagnosis with causal chain, physical cue referencing specific metrics, lift-type-aware feedback. Async — may complete after the rest of the pipeline.
 - **Lift Management (FR22-24):** List view, detail view, deletion with cascading cleanup of all associated files and data. Simple CRUD with file lifecycle management.
@@ -36,7 +36,7 @@ _This document builds collaboratively through step-by-step discovery. Sections a
 11 NFRs across 3 categories set hard constraints on the architecture:
 
 - **Performance (NFR1-5):** 3-minute end-to-end pipeline for <60s 1080p video, 1s page loads, 1s video playback start, <500ms skeleton/clean toggle, 1s SSE delivery latency. The 3-minute pipeline budget is the primary architectural constraint — it determines whether stages run sequentially or need parallelization, and whether video processing can happen in-process or needs worker separation.
-- **Integration (NFR6-8):** Graceful handling of MediaPipe and LLM API unavailability, no external infrastructure beyond those two APIs. The system must degrade, not fail, when dependencies are down.
+- **Integration (NFR6-8):** Graceful handling of Video Intelligence API and LLM API unavailability, no external infrastructure beyond those two APIs. The system must degrade, not fail, when dependencies are down.
 - **Reliability (NFR9-11):** No user-facing error screens, video persisted before processing, failed pipelines re-triggerable without re-upload. The "no error screens" constraint means the architecture must treat degraded results as normal results — no error state in the data model.
 
 **Scale & Complexity:**
@@ -49,7 +49,7 @@ _This document builds collaboratively through step-by-step discovery. Sections a
 
 - **Language/framework:** Go backend, HTMX + Tailwind CSS + DaisyUI frontend, server-rendered
 - **Storage:** SQLite for structured data, filesystem for video files and keypoint data
-- **External APIs:** MediaPipe (pose estimation), LLM API (coaching + phase segmentation)
+- **External APIs:** Google Cloud Video Intelligence (pose estimation), LLM API (coaching + phase segmentation)
 - **System dependency:** FFmpeg (required for video trim, crop, skeleton rendering, and thumbnail extraction — invoked via `exec.Command`)
 - **Deployment:** Single binary, no container orchestration, no external infrastructure
 - **Browser:** Chrome-only (mobile primary) — enables modern CSS/HTML features without polyfills
@@ -291,10 +291,10 @@ web/templates/
 - Rationale: Standard Linux process management, zero additional tooling
 
 **Configuration: Environment variables with defaults**
-- Required: `MEDIAPIPE_API_KEY`
+- Required: `GOOGLE_APPLICATION_CREDENTIALS` (path to GCP service account JSON key file)
 - Optional with defaults: `PORT` (8080), `DATA_DIR` (./data), `DB_PATH` (./data/press-out.db)
 - Claude Code manages its own authentication — no LLM API key needed
-- Rationale: Minimal config surface. Only the MediaPipe API key is truly required. Everything else has sensible defaults.
+- Rationale: Minimal config surface. Only the GCP credentials are truly required. Everything else has sensible defaults.
 
 **Logging: Go slog to stdout**
 - Structured JSON logging via Go's `slog` package (stdlib)
@@ -304,10 +304,11 @@ web/templates/
 
 ### External Integration Architecture
 
-**MediaPipe: HTTP API client**
-- Go HTTP client calling MediaPipe pose estimation API
-- Sends video frames, receives keypoint coordinates
-- Error handling: HTTP error codes, connection timeouts → skip pose estimation stage gracefully
+**Google Cloud Video Intelligence: gRPC client via Go client library**
+- Go client library (`cloud.google.com/go/videointelligence/apiv1`) calling Video Intelligence API
+- Sends video bytes, receives person detection with pose landmarks per frame
+- Authentication via Application Default Credentials (`GOOGLE_APPLICATION_CREDENTIALS` env var)
+- Error handling: gRPC errors, LRO timeouts → skip pose estimation stage gracefully
 - Affects: FR8 (keypoint detection)
 
 **Claude Code Headless: Subprocess runner**
@@ -336,7 +337,7 @@ web/templates/
 - Templates depend on route structure (HTMX endpoints) and data models (sqlc types)
 - Makefile orchestrates Go build + Tailwind build + sqlc generate
 - Claude Code subprocess runner depends on Claude Code being installed and authenticated on the VPS
-- MediaPipe client depends on API key configuration
+- Video Intelligence client depends on GCP credentials configuration
 
 ## Implementation Patterns & Consistency Rules
 
@@ -348,7 +349,7 @@ web/templates/
 
 **Go Code Naming:**
 - Follow standard Go conventions: `PascalCase` for exported identifiers, `camelCase` for unexported
-- Package names: lowercase, single word (`pipeline`, `storage`, `handler`, `sse`, `mediapipe`, `claude`)
+- Package names: lowercase, single word (`pipeline`, `storage`, `handler`, `sse`, `pose`, `claude`)
 - Receiver names: short, consistent per type (e.g., `s` for `Server`, `p` for `Pipeline`, `l` for `Lift`)
 - No `Get`/`Set` prefixes — `lift.Type()` not `lift.GetType()`
 - Interfaces named by behavior: `Stage`, `Broker`, `Store` — not `IStage` or `StageInterface`
@@ -388,7 +389,8 @@ internal/storage/storage.go        -- file storage operations
 internal/storage/db.go             -- database operations
 internal/sse/broker.go             -- SSE event broker
 internal/ffmpeg/ffmpeg.go          -- FFmpeg/ffprobe subprocess helper
-internal/mediapipe/client.go       -- MediaPipe API client
+internal/pose/client.go            -- provider-agnostic pose estimation interface
+internal/pose/videointel.go        -- Google Cloud Video Intelligence implementation
 internal/claude/runner.go          -- Claude Code subprocess runner
 ```
 
@@ -515,7 +517,7 @@ press-out/
 │   │       ├── trim_test.go
 │   │       ├── crop.go                -- auto-crop via person-barbell interaction
 │   │       ├── crop_test.go
-│   │       ├── pose.go                -- pose estimation (calls MediaPipe)
+│   │       ├── pose.go                -- pose estimation (calls Video Intelligence API)
 │   │       ├── pose_test.go
 │   │       ├── skeleton.go            -- skeleton overlay rendering
 │   │       ├── skeleton_test.go
@@ -534,9 +536,10 @@ press-out/
 │   │   ├── broker.go                  -- in-memory event broker (channels)
 │   │   └── broker_test.go
 │   │
-│   ├── mediapipe/
-│   │   ├── client.go                  -- HTTP client for MediaPipe API
-│   │   └── client_test.go
+│   ├── pose/
+│   │   ├── client.go                  -- provider-agnostic pose estimation interface and types
+│   │   ├── videointel.go              -- Google Cloud Video Intelligence implementation
+│   │   └── videointel_test.go
 │   │
 │   └── claude/
 │       ├── runner.go                  -- Claude Code headless subprocess runner
@@ -604,8 +607,8 @@ press-out/
 **Pipeline Boundary (pipeline package):**
 - Orchestrator runs stages sequentially, emits events via SSE broker
 - Stages receive `StageInput`, return `StageOutput` — no access to HTTP layer, no direct DB access
-- Stages call external integrations (mediapipe, claude) through injected clients
-- One-way dependency: pipeline -> stages, pipeline -> sse, stages -> mediapipe/claude, stages -> storage (file paths only)
+- Stages call external integrations (pose, claude) through injected clients
+- One-way dependency: pipeline -> stages, pipeline -> sse, stages -> pose/claude, stages -> storage (file paths only)
 
 **Storage Boundary (storage package):**
 - Sole owner of SQLite access (via sqlc-generated code) and file path construction
@@ -619,7 +622,7 @@ press-out/
 - No knowledge of what events mean — just routing messages by lift ID
 - Independent: sse depends on nothing internal
 
-**External Integration Boundary (mediapipe, claude packages):**
+**External Integration Boundary (pose, claude packages):**
 - Each external integration is isolated in its own package
 - Exposes a single client type with methods matching what stages need
 - Handles its own error wrapping, timeout, and retry logic
@@ -638,7 +641,7 @@ press-out/
 - `internal/pipeline/stages/trim.go` — FR4 (auto-trim)
 - `internal/pipeline/stages/pose.go` — FR8 (keypoint detection, runs before crop)
 - `internal/pipeline/stages/crop.go` — FR5 (auto-crop using keypoint bounding box)
-- `internal/mediapipe/client.go` — MediaPipe API integration
+- `internal/pose/` — provider-agnostic pose estimation interface + Video Intelligence implementation
 - `internal/pipeline/stage.go` — FR7 (independent stage interface)
 
 **Skeleton Visualization (FR9-10):**
@@ -675,10 +678,10 @@ press-out/
 - `handler` -> `pipeline`: starts pipeline goroutine for a lift
 - `pipeline` -> `sse.Broker`: publishes stage events
 - `handler/sse` -> `sse.Broker`: subscribes to events, streams to HTTP response
-- `pipeline/stages` -> `mediapipe`, `claude`: external service calls
+- `pipeline/stages` -> `pose`, `claude`: external service calls
 
 **External Integrations:**
-- **MediaPipe API** (`internal/mediapipe/client.go`): HTTP POST with video frames, receives JSON keypoint data
+- **Google Cloud Video Intelligence API** (`internal/pose/videointel.go`): gRPC with video bytes, receives person detection with pose landmarks
 - **Claude Code** (`internal/claude/runner.go`): Subprocess execution with structured prompt, parses stdout response
 
 **Data Flow:**
@@ -686,7 +689,7 @@ press-out/
 Upload (HTTP) -> storage.CreateLift() -> SQLite row + original.mp4
   -> pipeline.Run() [goroutine]
     -> trim.Run()     -> trimmed.mp4 (or skip)
-    -> pose.Run()     -> keypoints.json (via MediaPipe API)
+    -> pose.Run()     -> keypoints.json (via Video Intelligence API)
     -> crop.Run()     -> cropped.mp4 + crop-params.json + thumbnail.jpg (uses keypoints for bounding box)
     -> skeleton.Run() -> skeleton.mp4 (transforms keypoints to cropped frame via crop-params.json)
     -> metrics.Run()  -> SQLite metrics rows
@@ -713,7 +716,7 @@ dev:              air  # hot-reload for development
 
 ### Coherence Validation
 
-**Decision Compatibility:** All decisions are compatible. Go stdlib `net/http` (1.22+) + HTMX + Tailwind/DaisyUI is an established pattern. mattn/go-sqlite3 + sqlc work natively together. SSE via Go stdlib pairs with HTMX's SSE extension. MediaPipe (HTTP) and Claude Code (subprocess) integrate independently without interference. FFmpeg invoked via `exec.Command` from pipeline stages. No conflicting decisions found.
+**Decision Compatibility:** All decisions are compatible. Go stdlib `net/http` (1.22+) + HTMX + Tailwind/DaisyUI is an established pattern. mattn/go-sqlite3 + sqlc work natively together. SSE via Go stdlib pairs with HTMX's SSE extension. Video Intelligence (gRPC) and Claude Code (subprocess) integrate independently without interference. FFmpeg invoked via `exec.Command` from pipeline stages. No conflicting decisions found.
 
 **Pattern Consistency:** Naming conventions are unambiguous across layers (Go conventions for code, snake_case for SQL, kebab-case for templates/SSE). The Stage interface provides a single uniform pattern for all pipeline processing. The storage package as sole owner of paths and DB access prevents cross-agent inconsistency.
 
@@ -727,7 +730,7 @@ dev:              air  # hot-reload for development
 |---|---|---|---|
 | FR1-3 | Upload & Storage | handler/lift.go, storage/, lifts table | Covered |
 | FR4-7 | Video Processing | pipeline orchestrator, stages/trim, stages/crop, Stage interface | Covered |
-| FR8-10 | Pose & Visualization | stages/pose, stages/skeleton, mediapipe/client | Covered |
+| FR8-10 | Pose & Visualization | stages/pose, stages/skeleton, pose/videointel | Covered |
 | FR11-18 | Metrics & Phases | stages/metrics, stages/coaching, metrics + phases tables | Covered |
 | FR19-21 | Coaching | stages/coaching, claude/runner | Covered |
 | FR22-24 | Lift Management | handler/lift CRUD, templates, cascading delete | Covered |
@@ -743,7 +746,7 @@ dev:              air  # hot-reload for development
 | NFR3 | 1s video start | Pre-rendered videos served as static files | Covered |
 | NFR4 | <500ms toggle | Dual pre-rendered videos, JS src swap | Covered |
 | NFR5 | 1s SSE delivery | In-memory broker, Go channels | Covered |
-| NFR6 | MediaPipe failure | mediapipe/client error handling + stage skip | Covered |
+| NFR6 | Video Intelligence failure | pose/videointel error handling + stage skip | Covered |
 | NFR7 | LLM failure | claude/runner error handling + stage skip | Covered |
 | NFR8 | No external infra | SQLite + filesystem, single binary | Covered |
 | NFR9 | No error screens | Graceful degradation, no error state in DB | Covered |
@@ -782,7 +785,7 @@ dev:              air  # hot-reload for development
 **Architectural Decisions**
 - [x] Critical decisions documented with specific technologies
 - [x] Technology stack fully specified
-- [x] Integration patterns defined (HTTP for MediaPipe, subprocess for Claude Code, exec.Command for FFmpeg)
+- [x] Integration patterns defined (gRPC for Video Intelligence, subprocess for Claude Code, exec.Command for FFmpeg)
 - [x] Performance considerations addressed
 
 **Implementation Patterns**

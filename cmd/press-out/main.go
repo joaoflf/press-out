@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"html/template"
 	"log/slog"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 	"press-out/internal/handler"
 	"press-out/internal/pipeline"
 	"press-out/internal/pipeline/stages"
+	"press-out/internal/pose"
 	"press-out/internal/sse"
 	"press-out/internal/storage"
 	"press-out/internal/storage/sqlc"
@@ -86,6 +88,15 @@ func main() {
 	broker := sse.NewBroker()
 	pipelineStages := pipeline.DefaultStages()
 	pipelineStages[0] = &stages.TrimStage{} // Replace stub with real trim stage
+
+	poseClient, err := pose.NewVideoIntelClient(context.Background())
+	if err != nil {
+		slog.Warn("pose estimation unavailable — stage will be skipped", "error", err)
+	} else {
+		defer poseClient.Close()
+		pipelineStages[1] = stages.NewPoseStage(poseClient) // Replace stub with real pose stage
+	}
+
 	pl := pipeline.New(pipelineStages, broker)
 
 	srv := &handler.Server{
