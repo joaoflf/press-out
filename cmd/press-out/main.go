@@ -11,6 +11,7 @@ import (
 	"press-out/internal/ffmpeg"
 	"press-out/internal/handler"
 	"press-out/internal/pipeline"
+	"press-out/internal/pipeline/stages"
 	"press-out/internal/sse"
 	"press-out/internal/storage"
 	"press-out/internal/storage/sqlc"
@@ -83,7 +84,9 @@ func main() {
 	}
 
 	broker := sse.NewBroker()
-	pl := pipeline.New(pipeline.DefaultStages(), broker)
+	pipelineStages := pipeline.DefaultStages()
+	pipelineStages[0] = &stages.TrimStage{} // Replace stub with real trim stage
+	pl := pipeline.New(pipelineStages, broker)
 
 	srv := &handler.Server{
 		Queries:   queries,
