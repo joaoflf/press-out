@@ -231,8 +231,7 @@ GET  /lifts/{id}/status    -> Pipeline status fragment
 - Each lift gets its own SSE endpoint (`/lifts/{id}/events`)
 - Pipeline goroutine publishes stage events to an in-memory broker (Go channels)
 - SSE handler subscribes to the broker and writes events to the HTTP response
-- On reconnection, client gets current state from the database (not replayed events)
-- Rationale: Simple, no persistence needed for ephemeral progress events. Go's concurrency primitives (goroutines + channels) make this natural.
+- Rationale: Simple, no persistence needed for ephemeral progress events. Go's concurrency primitives (goroutines + channels) make this natural. SSE reconnection handling is deferred to post-MVP.
 
 **Error Handling: Graceful degradation, no error screens**
 - Pipeline errors: Logged server-side, stage marked skipped, pipeline continues with last successful input. UI renders degraded results identically to full results.

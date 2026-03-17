@@ -69,7 +69,7 @@ This document provides the complete epic and story breakdown for press-out, deco
 - No authentication: Single-user personal tool, no auth, no sessions, no user model
 - File upload validation: ~300MB max via `http.MaxBytesReader`, server-side MIME type/extension check for mp4/mov
 - Route structure: 5 main routes (GET /, POST /lifts, GET /lifts/{id}, DELETE /lifts/{id}, GET /lifts/{id}/events) + 2 HTMX partial endpoints (GET /lifts/{id}/coaching, GET /lifts/{id}/status)
-- SSE implementation: Per-lift event stream with in-memory broker (Go channels), reconnection gets current state from DB
+- SSE implementation: Per-lift event stream with in-memory broker (Go channels). SSE reconnection handling deferred to post-MVP
 - Graceful degradation: Pipeline errors logged server-side, stage marked skipped, pipeline continues with last successful input; no error state in data model
 - FFmpeg system dependency: Required for video trim, crop, skeleton rendering, and thumbnail extraction via `exec.Command`
 - Pipeline Stage interface: All stages implement `Stage` interface with `Name()` and `Run(ctx, StageInput) (StageOutput, error)`
