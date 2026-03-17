@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 
 	"press-out/internal/config"
+	"press-out/internal/ffmpeg"
 	"press-out/internal/handler"
 	"press-out/internal/pipeline"
 	"press-out/internal/sse"
@@ -25,6 +26,12 @@ func main() {
 		"data_dir", cfg.DataDir,
 		"db_path", cfg.DBPath,
 	)
+
+	if version, err := ffmpeg.Probe(); err != nil {
+		slog.Warn("ffmpeg not available — video processing stages will be skipped", "error", err)
+	} else {
+		slog.Info("ffmpeg available", "version", version)
+	}
 
 	db, err := storage.NewDB(cfg.DBPath)
 	if err != nil {

@@ -1,6 +1,6 @@
 TAILWINDCSS ?= npx tailwindcss
 
-.PHONY: build sqlc-generate tailwind-build go-build test run dev setup
+.PHONY: build sqlc-generate tailwind-build go-build test run dev setup check-deps
 
 build: sqlc-generate tailwind-build go-build
 
@@ -24,3 +24,10 @@ dev:
 
 setup:
 	npm ci
+
+check-deps:
+	@echo "Checking dependencies..."
+	@which ffmpeg > /dev/null 2>&1 && echo "  ffmpeg: $$(ffmpeg -version 2>&1 | head -1)" || echo "  ffmpeg: NOT FOUND (required for video processing)"
+	@which ffprobe > /dev/null 2>&1 && echo "  ffprobe: $$(ffprobe -version 2>&1 | head -1)" || echo "  ffprobe: NOT FOUND (required for video analysis)"
+	@which sqlc > /dev/null 2>&1 && echo "  sqlc: $$(sqlc version 2>&1)" || echo "  sqlc: NOT FOUND"
+	@which go > /dev/null 2>&1 && echo "  go: $$(go version 2>&1)" || echo "  go: NOT FOUND"
