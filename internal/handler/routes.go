@@ -4,6 +4,8 @@ import (
 	"html/template"
 	"net/http"
 
+	"press-out/internal/pipeline"
+	"press-out/internal/sse"
 	"press-out/internal/storage/sqlc"
 )
 
@@ -12,6 +14,8 @@ type Server struct {
 	Queries   *sqlc.Queries
 	Templates map[string]*template.Template
 	DataDir   string
+	Pipeline  *pipeline.Pipeline
+	Broker    *sse.Broker
 }
 
 // RegisterRoutes sets up all HTTP routes on the given mux.

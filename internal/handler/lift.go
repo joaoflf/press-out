@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"log/slog"
@@ -30,6 +31,7 @@ type LiftItem struct {
 	DisplayType  string
 	DisplayDate  string
 	HasThumbnail bool
+	Processing   bool
 }
 
 // HandleListLifts renders the lift list page at GET /.
@@ -54,6 +56,7 @@ func (s *Server) HandleListLifts(w http.ResponseWriter, r *http.Request) {
 			DisplayType:  formatLiftType(l.LiftType),
 			DisplayDate:  formatDate(l.CreatedAt),
 			HasThumbnail: thumbErr == nil,
+			Processing:   s.Broker != nil && s.Broker.IsProcessing(l.ID),
 		})
 	}
 
@@ -129,6 +132,11 @@ func (s *Server) HandleCreateLift(w http.ResponseWriter, r *http.Request) {
 	}
 
 	slog.Info("lift uploaded", "id", lift.ID, "type", liftType)
+
+	if s.Pipeline != nil {
+		go s.Pipeline.Run(context.Background(), lift.ID, s.DataDir)
+	}
+
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
@@ -171,6 +179,7 @@ type LiftDetailData struct {
 	DisplayType string
 	DisplayDate string
 	VideoSrc    string
+	Processing  bool
 }
 
 // HandleGetLift handles GET /lifts/{id} — renders the lift detail page.
@@ -196,6 +205,7 @@ func (s *Server) HandleGetLift(w http.ResponseWriter, r *http.Request) {
 		DisplayType: formatLiftType(lift.LiftType),
 		DisplayDate: formatDate(lift.CreatedAt),
 		VideoSrc:    fmt.Sprintf("/data/lifts/%d/%s", lift.ID, videoFile),
+		Processing:  s.Broker != nil && s.Broker.IsProcessing(lift.ID),
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -249,9 +259,46 @@ func (s *Server) HandleDeleteLift(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-// HandleLiftEvents handles GET /lifts/{id}/events SSE (stub for later stories).
+// HandleLiftEvents handles GET /lifts/{id}/events — streams SSE pipeline progress.
 func (s *Server) HandleLiftEvents(w http.ResponseWriter, r *http.Request) {
-	http.Error(w, "Not Implemented", http.StatusNotImplemented)
+	if s.Broker == nil {
+		http.Error(w, "Not Implemented", http.StatusNotImplemented)
+		return
+	}
+
+	idStr := r.PathValue("id")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		http.Error(w, "Not Found", http.StatusNotFound)
+		return
+	}
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "Streaming not supported", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+
+	ch := s.Broker.Subscribe(id)
+	defer s.Broker.Unsubscribe(id, ch)
+
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case event, ok := <-ch:
+			if !ok {
+				return
+			}
+			fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event.Name, event.Data)
+			flusher.Flush()
+		}
+	}
 }
 
 // HandleLiftCoaching handles GET /lifts/{id}/coaching (stub for later stories).
