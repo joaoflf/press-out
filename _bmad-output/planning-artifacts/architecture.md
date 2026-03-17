@@ -186,14 +186,20 @@ go mod init press-out
 - Affects: Database initialization and evolution
 
 **Video File Organization: Lift-ID directories**
-- Structure: `data/lifts/{lift-id}/original.mp4`, `trimmed.mp4`, `cropped.mp4`, `skeleton.mp4`, `thumbnail.jpg`, `keypoints.json`
+- Structure: `data/lifts/{lift-id}/original.mp4`, `trimmed.mp4`, `cropped.mp4`, `skeleton.mp4`, `thumbnail.jpg`, `keypoints.json`, `crop-params.json`
 - Rationale: Self-contained per-lift folders. Deletion is `os.RemoveAll`. Structure is self-documenting. Maps directly to the domain model.
 - Affects: Pipeline output, file serving, lift deletion
 
 **Keypoint Data: JSON file per lift**
 - Storage: `data/lifts/{lift-id}/keypoints.json`
-- Rationale: Write-once, read-once access pattern (written by pose estimation, read once for metrics computation). Keeps SQLite lean. Large data (~60K data points per lift) better suited to file storage. Lifecycle managed by lift directory.
-- Affects: Pose estimation output, metrics computation input
+- Rationale: Write-once, read-many access pattern (written by pose estimation, read by crop, skeleton, and metrics stages). Keeps SQLite lean. Large data (~60K data points per lift) better suited to file storage. Lifecycle managed by lift directory.
+- Affects: Pose estimation output, crop stage input (bounding box), skeleton rendering input, metrics computation input
+
+**Crop Parameters: JSON file per lift**
+- Storage: `data/lifts/{lift-id}/crop-params.json`
+- Contents: `{x, y, w, h, sourceWidth, sourceHeight}` — the crop rectangle applied to the trimmed/original video
+- Rationale: Written by crop stage, read by skeleton stage for keypoint coordinate transformation. Small file, simple JSON. Avoids coupling StageOutput to crop-specific fields.
+- Affects: Crop stage output, skeleton rendering input (coordinate transformation)
 
 ### Authentication & Security
 
@@ -579,7 +585,8 @@ press-out/
 │           ├── cropped.mp4
 │           ├── skeleton.mp4
 │           ├── thumbnail.jpg
-│           └── keypoints.json
+│           ├── keypoints.json
+│           └── crop-params.json
 │
 └── testdata/                          -- shared test fixtures
     └── videos/
@@ -626,16 +633,16 @@ press-out/
 - `sql/queries/lifts.sql` — lift queries
 - `web/templates/partials/upload-modal.html` — upload UI
 
-**Video Processing (FR4-7):**
+**Video Processing (FR4-8):**
 - `internal/pipeline/pipeline.go` — orchestrator with skip logic
 - `internal/pipeline/stages/trim.go` — FR4 (auto-trim)
-- `internal/pipeline/stages/crop.go` — FR5 (auto-crop)
+- `internal/pipeline/stages/pose.go` — FR8 (keypoint detection, runs before crop)
+- `internal/pipeline/stages/crop.go` — FR5 (auto-crop using keypoint bounding box)
+- `internal/mediapipe/client.go` — MediaPipe API integration
 - `internal/pipeline/stage.go` — FR7 (independent stage interface)
 
-**Pose Estimation & Visualization (FR8-10):**
-- `internal/pipeline/stages/pose.go` — FR8 (keypoint detection)
-- `internal/pipeline/stages/skeleton.go` — FR9-10 (skeleton rendering, dual video)
-- `internal/mediapipe/client.go` — MediaPipe API integration
+**Skeleton Visualization (FR9-10):**
+- `internal/pipeline/stages/skeleton.go` — FR9-10 (skeleton rendering on cropped video, with coordinate transformation via crop-params.json)
 
 **Lift Metrics & Phase Analysis (FR11-18):**
 - `internal/pipeline/stages/metrics.go` — FR11-16 (six metrics)
@@ -679,9 +686,9 @@ press-out/
 Upload (HTTP) -> storage.CreateLift() -> SQLite row + original.mp4
   -> pipeline.Run() [goroutine]
     -> trim.Run()     -> trimmed.mp4 (or skip)
-    -> crop.Run()     -> cropped.mp4 (or skip) + thumbnail.jpg (via FFmpeg)
     -> pose.Run()     -> keypoints.json (via MediaPipe API)
-    -> skeleton.Run() -> skeleton.mp4
+    -> crop.Run()     -> cropped.mp4 + crop-params.json + thumbnail.jpg (uses keypoints for bounding box)
+    -> skeleton.Run() -> skeleton.mp4 (transforms keypoints to cropped frame via crop-params.json)
     -> metrics.Run()  -> SQLite metrics rows
     -> coaching.Run() -> SQLite phases + coaching rows (via Claude Code)
   -> SSE events emitted at each stage transition

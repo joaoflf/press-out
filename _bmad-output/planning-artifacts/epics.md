@@ -120,8 +120,8 @@ Every story that produces or modifies HTML pages or partials **must** include Ch
 
 **Stories requiring ChromeDP verification:**
 - Epic 1: Stories 1.1, 1.2, 1.3, 1.4, 1.5 (all have UI)
-- Epic 2: Stories 2.1 (pipeline progress UI), 2.5 (progressive video availability)
-- Epic 3: Story 3.3 (video player with toggle & speed controls)
+- Epic 2: Stories 2.1 (pipeline progress UI), 2.6 (progressive video availability)
+- Epic 3: Story 3.2 (video player with toggle & speed controls)
 - Epic 4: Stories 4.3 (phase timeline), 4.4 (metrics display grid)
 - Epic 5: Story 5.2 (coaching card display)
 
@@ -134,7 +134,7 @@ Every story that produces or modifies HTML pages or partials **must** include Ch
 - FR5: Epic 2 - Auto-crop to lifter
 - FR6: Epic 2 - Full video fallback on low confidence
 - FR7: Epic 2 - Independent pipeline stage processing
-- FR8: Epic 3 - Body keypoint detection
+- FR8: Epic 2 - Body keypoint detection
 - FR9: Epic 3 - Skeleton overlay rendering
 - FR10: Epic 3 - Dual video production (clean + skeleton)
 - FR11: Epic 4 - Pull-to-catch ratio computation
@@ -165,12 +165,12 @@ The lifter can upload a video from their phone, assign a lift type, browse all t
 **FRs covered:** FR1, FR2, FR3, FR22, FR23, FR24
 
 ### Epic 2: Auto-Process Videos with Live Progress
-After uploading, the system automatically trims the video to just the lift and crops to the lifter. The lifter sees real-time progress as each processing stage completes. Video is viewable immediately even while processing continues. Includes pipeline orchestrator, SSE broker, trim and crop stages, graceful degradation.
-**FRs covered:** FR4, FR5, FR6, FR7, FR28, FR29, FR30
+After uploading, the system automatically trims the video to just the lift, detects body keypoints via pose estimation, and crops to the lifter using keypoint data. The lifter sees real-time progress as each processing stage completes. Video is viewable immediately even while processing continues. Includes pipeline orchestrator, SSE broker, trim/pose/crop stages, graceful degradation.
+**FRs covered:** FR4, FR5, FR6, FR7, FR8, FR28, FR29, FR30
 
 ### Epic 3: Skeleton Overlay & Video Review
-The system detects body keypoints and renders a skeleton overlay as a separate video. The lifter can toggle between clean and skeleton views instantly and control playback speed for frame-by-frame analysis.
-**FRs covered:** FR8, FR9, FR10, FR25, FR26
+The system renders a skeleton overlay as a separate video using keypoint data from Epic 2. The lifter can toggle between clean and skeleton views instantly and control playback speed for frame-by-frame analysis.
+**FRs covered:** FR9, FR10, FR25, FR26
 
 ### Epic 4: Lift Metrics & Phase Analysis
 The system computes six biomechanical metrics (pull-to-catch ratio, bar path, velocity curve, joint angles, phase durations, key position snapshots), segments the lift into phases, and displays a navigable phase timeline.
@@ -306,7 +306,7 @@ So that my lift list stays clean and relevant.
 
 ## Epic 2: Auto-Process Videos with Live Progress
 
-After uploading, the system automatically trims the video to just the lift and crops to the lifter. The lifter sees real-time progress as each processing stage completes. Video is viewable immediately even while processing continues.
+After uploading, the system automatically trims the video to just the lift, detects body keypoints via pose estimation, and crops to the lifter using keypoint data. The lifter sees real-time progress as each processing stage completes. Video is viewable immediately even while processing continues.
 
 ### Story 2.1: Pipeline Orchestrator & SSE Progress
 
@@ -395,7 +395,34 @@ So that I can review the lift immediately without scrubbing through setup footag
 **And** the stage returns an error to the orchestrator
 **And** the orchestrator skips the stage and passes the original video forward (FR7)
 
-### Story 2.4: Auto-Crop to Lifter
+### Story 2.4: Pose Estimation via MediaPipe
+
+As a lifter,
+I want the system to detect my body positions from the video,
+So that my joint movements can be used for cropping, visualization, and analysis.
+
+**Acceptance Criteria:**
+
+**Given** the pipeline reaches the pose estimation stage with a trimmed (or original) video
+**When** the pose stage runs
+**Then** the system sends video frames to the MediaPipe API via the HTTP client
+**And** keypoint coordinates (joints, limbs) are received for each frame (FR8)
+**And** the keypoint data is saved as keypoints.json in the lift-ID directory
+
+**Given** the MediaPipe API is unavailable or returns an error
+**When** the pose stage attempts to connect
+**Then** the error is logged with slog (lift_id, stage, error attributes)
+**And** the stage returns an error to the orchestrator
+**And** the orchestrator skips the stage gracefully (NFR6)
+**And** downstream stages that depend on keypoints (crop, skeleton, metrics) are also skipped
+**And** no error screen is shown to the lifter
+
+**Given** the video contains partial occlusion or variable lighting
+**When** the pose stage processes the frames
+**Then** keypoints are extracted with the best available confidence
+**And** low-confidence keypoints are included in the output (graceful degradation over omission)
+
+### Story 2.5: Auto-Crop to Lifter
 
 As a lifter,
 I want the system to automatically crop the video to focus on me,
@@ -403,29 +430,30 @@ So that I see only my lift without distracting bystanders or background.
 
 **Acceptance Criteria:**
 
-**Given** the pipeline reaches the crop stage with a trimmed (or original) video
+**Given** keypoints.json exists from the pose estimation stage
 **When** the crop stage runs
-**Then** the system uses person-barbell interaction detection to identify the lifter
-**And** the video is cropped to isolate the lifter via FFmpeg
-**And** the cropped video is saved as cropped.mp4 in the lift-ID directory
+**Then** the system computes a bounding box from the keypoint data to identify the lifter's region
+**And** the crop region is expanded with padding and enforced to 9:16 aspect ratio
+**And** the video is cropped via FFmpeg and saved as cropped.mp4 in the lift-ID directory
+**And** crop parameters (x, y, w, h, source dimensions) are saved as crop-params.json in the lift-ID directory for downstream coordinate transformation
 
 **Given** the crop stage successfully produces a cropped video
 **When** the crop completes
 **Then** a thumbnail is extracted from the cropped video via FFmpeg
 **And** the thumbnail is saved as thumbnail.jpg in the lift-ID directory
 
-**Given** the person-barbell detection confidence falls below the threshold
-**When** the crop stage cannot confidently identify the lifter
+**Given** keypoints.json does not exist (pose estimation was skipped)
+**When** the crop stage is reached
 **Then** the full frame video is preserved as the crop output (FR6)
 **And** a thumbnail is still extracted from the uncropped video
 **And** the stage completes without error (graceful degradation)
 
 **Given** multiple people are in the frame
 **When** the crop stage runs
-**Then** the system identifies the person interacting with the barbell as the lifter (FR5)
+**Then** the system identifies the person with the most vertical movement in the keypoint data as the lifter (FR5)
 **And** other people in the frame are excluded by the crop
 
-### Story 2.5: Progressive Video Availability & Pipeline Re-trigger
+### Story 2.6: Progressive Video Availability & Pipeline Re-trigger
 
 As a lifter,
 I want to watch my video immediately after upload without waiting for all processing to finish,
@@ -452,36 +480,9 @@ So that I can start reviewing while analysis continues in the background.
 
 ## Epic 3: Skeleton Overlay & Video Review
 
-The system detects body keypoints and renders a skeleton overlay as a separate video. The lifter can toggle between clean and skeleton views instantly and control playback speed for frame-by-frame analysis.
+The system renders a skeleton overlay as a separate video using keypoint data from Epic 2. The lifter can toggle between clean and skeleton views instantly and control playback speed for frame-by-frame analysis.
 
-### Story 3.1: Pose Estimation via MediaPipe
-
-As a lifter,
-I want the system to detect my body positions from the video,
-So that my joint movements can be visualized and analyzed.
-
-**Acceptance Criteria:**
-
-**Given** the pipeline reaches the pose estimation stage with a processed video (cropped > trimmed > original)
-**When** the pose stage runs
-**Then** the system sends video frames to the MediaPipe API via the HTTP client
-**And** keypoint coordinates (joints, limbs) are received for each frame (FR8)
-**And** the keypoint data is saved as keypoints.json in the lift-ID directory
-
-**Given** the MediaPipe API is unavailable or returns an error
-**When** the pose stage attempts to connect
-**Then** the error is logged with slog (lift_id, stage, error attributes)
-**And** the stage returns an error to the orchestrator
-**And** the orchestrator skips the stage gracefully (NFR6)
-**And** downstream stages that depend on keypoints are also skipped
-**And** no error screen is shown to the lifter
-
-**Given** the video contains partial occlusion or variable lighting
-**When** the pose stage processes the frames
-**Then** keypoints are extracted with the best available confidence
-**And** low-confidence keypoints are included in the output (graceful degradation over omission)
-
-### Story 3.2: Skeleton Overlay Rendering
+### Story 3.1: Skeleton Overlay Rendering
 
 As a lifter,
 I want a skeleton overlay rendered on my lift video,
@@ -489,11 +490,17 @@ So that I can see my body positions and joint angles visually during the movemen
 
 **Acceptance Criteria:**
 
-**Given** keypoints.json exists for a lift
+**Given** keypoints.json and crop-params.json exist for a lift
 **When** the skeleton rendering stage runs
-**Then** a skeleton overlay is drawn onto each video frame using the keypoint data
+**Then** keypoint coordinates are transformed from the original frame space to cropped frame space using the crop parameters
+**And** a skeleton overlay is drawn onto each cropped video frame using the transformed keypoint data
 **And** the skeleton-overlay video is rendered via FFmpeg and saved as skeleton.mp4 in the lift-ID directory (FR9)
 **And** both the clean video and skeleton video are available for the lift (FR10)
+
+**Given** crop-params.json does not exist (crop preserved full frame)
+**When** the skeleton rendering stage runs
+**Then** keypoint coordinates are used as-is without transformation
+**And** the skeleton is rendered on the full-frame video
 
 **Given** keypoints have varying confidence levels across frames
 **When** the skeleton is rendered
@@ -505,7 +512,7 @@ So that I can see my body positions and joint angles visually during the movemen
 **Then** the stage is skipped since there is no keypoint data to render
 **And** the pipeline continues without a skeleton video
 
-### Story 3.3: Video Player with Toggle & Speed Controls
+### Story 3.2: Video Player with Toggle & Speed Controls
 
 As a lifter,
 I want to toggle between skeleton and clean video and control playback speed,

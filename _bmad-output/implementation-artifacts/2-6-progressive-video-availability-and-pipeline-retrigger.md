@@ -1,4 +1,4 @@
-# Story 2.5: Progressive Video Availability & Pipeline Re-trigger
+# Story 2.6: Progressive Video Availability & Pipeline Re-trigger
 
 Status: ready-for-dev
 
