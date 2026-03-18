@@ -145,28 +145,57 @@ No other files should be created or modified.
 ## Dev Agent Record
 
 ### Agent Model Used
+Claude Opus 4.6 (1M context)
 
 ### Completion Notes List
+- 2026-03-18: Spike completed. API integration verified with 3 feature configurations.
+- CRITICAL FINDING: `IncludePoseLandmarks: true` causes "Calculator failure" (code=2) server-side.
+- PERSON_DETECTION with bounding boxes only WORKS. LABEL_DETECTION WORKS.
+- Story 2.4 CANNOT rely on Video Intelligence API for pose landmarks. Needs alternative approach.
 
 ### Change Log
+- Rewrote `internal/pose/videointel_integration_test.go` as self-contained external test (`package pose_test`)
+- Split into 3 test functions: LabelDetection, PersonDetection_BBoxOnly, PersonDetection_PoseLandmarks
+- Each test directly calls the API without production code wrappers
 
 ### API Findings
-<!-- The dev agent MUST fill this section after running the integration test -->
 
-**Go import path:** (fill after verification)
+**Go import path:** `cloud.google.com/go/videointelligence/apiv1` (client) and `cloud.google.com/go/videointelligence/apiv1/videointelligencepb` (proto types). Both resolve correctly from go.mod.
 
-**Landmark names returned by API:** (list all unique names)
+**Landmark names returned by API:** NONE — `IncludePoseLandmarks: true` causes a server-side "Calculator failure" (gRPC code=2, UNKNOWN). No landmarks are returned.
 
-**Frame count for sample video:** (fill after test)
+**Frame count for sample video:** N/A for landmarks. With bbox-only person detection on a 4.1MB re-encoded version of sample-lift.mp4: 1 person annotation returned (tracks and timestamped objects available).
 
-**Persons detected:** (fill after test)
+**Persons detected:** 1 (with IncludeBoundingBoxes only). 0 with IncludePoseLandmarks (Calculator failure returns empty results).
 
-**Average landmarks per frame:** (fill after test)
+**Average landmarks per frame:** N/A — no landmarks returned.
 
 **Protobuf field names used:**
-- Request: (fill exact field names that compiled)
-- Response: (fill exact field names for accessing results)
+- Request: `AnnotateVideoRequest{InputContent, Features: []Feature{Feature_PERSON_DETECTION}, VideoContext: &VideoContext{PersonDetectionConfig: &PersonDetectionConfig{IncludePoseLandmarks, IncludeBoundingBoxes}}}`
+- Response: `AnnotateVideoResponse.AnnotationResults[0].PersonDetectionAnnotations[i].Tracks[j].TimestampedObjects[k]`
+  - `.TimeOffset` — `*durationpb.Duration`, use `.AsDuration().Milliseconds()`
+  - `.NormalizedBoundingBox` — `{Left, Top, Right, Bottom}` (all float32, normalized 0-1)
+  - `.Landmarks[]` — `{Name string, Point *NormalizedVertex{X,Y}, Confidence float32}` (never populated due to Calculator failure)
+- Error field: `AnnotationResults[0].Error` — `*status.Status{Code int32, Message string}`
 
-**Surprises / deviations from Story 2.4 assumptions:** (fill after test)
+**Surprises / deviations from Story 2.4 assumptions:**
+
+1. **CRITICAL: Pose landmarks are broken.** `IncludePoseLandmarks: true` triggers "Calculator failure" (code=2) on the server. This is NOT a client-side issue — the request is accepted, the LRO runs for ~1-2 minutes, then returns an error in `AnnotationResults[0].Error`. This was tested with multiple video sizes (317KB, 4.1MB, 27MB) — all fail identically.
+
+2. **Person detection bounding boxes DO work.** `IncludeBoundingBoxes: true` (without landmarks) returns valid person tracking with normalized bounding boxes. The response structure matches the expected `Tracks[].TimestampedObjects[]` pattern.
+
+3. **Label detection works.** Confirms the API is enabled, credentials are valid, and the service account has access. Returns segment and shot labels correctly.
+
+4. **Original video (27MB) also causes Calculator failure.** Both the original and re-encoded versions fail with landmarks enabled. The 27MB version is slower (~10 min LRO) but the error is the same.
+
+5. **GOOGLE_APPLICATION_CREDENTIALS env var was not set in shell** but the credential file exists at `~/.config/press-out/gcp-sa.json`. The test requires setting it explicitly.
+
+6. **LRO latency is high.** Even a 4.1MB video takes 60-100 seconds for person detection. The original 27MB video takes 2-10 minutes.
+
+**Recommendation for Story 2.4:** The Video Intelligence API cannot provide pose landmarks. Story 2.4 must either:
+- (a) Use only bounding boxes from Video Intelligence API (no body keypoints)
+- (b) Switch to a local pose estimation library (MediaPipe Pose, MoveNet via TensorFlow Lite, or OpenPose)
+- (c) Use a different cloud API that supports pose estimation (e.g., AWS Rekognition, Azure AI Vision)
 
 ### File List
+- `internal/pose/videointel_integration_test.go` — rewritten as external test with 3 diagnostic subtests
