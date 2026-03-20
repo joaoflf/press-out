@@ -83,13 +83,13 @@ so that I see only my lift without distracting bystanders or background.
 ## Prerequisites
 
 - Story 2.2 (FFmpeg Integration & Verification) must be complete — this story depends on `ffmpeg.CropVideo()`, `ffmpeg.ExtractThumbnail()`, and `ffmpeg.GetDuration()`.
-- Story 2.4 (Pose Estimation) must be complete — this story reads keypoints.json produced by the pose stage.
+- Story 2.4 (Client-Side Pose Estimation & Upload) must be complete — this story reads keypoints.json uploaded from the browser.
 
 ## Dev Notes
 
 - **Person selection is handled upstream by Story 2.4 (pose estimation).** The keypoints.json always contains a single person's data (the primary lifter, selected by largest average bounding box area). The crop stage does not need multi-person logic — it computes the bounding box from the single person's keypoints directly.
 - The crop stage receives `StageInput.VideoPath` from the pose stage (which passes through the trimmed/original video unchanged). It also needs to read `keypoints.json` from the lift directory — this is NOT passed via StageInput but read directly from the filesystem using `storage.LiftFile(input.DataDir, input.LiftID, storage.FileKeypoints)`.
-- The keypoints.json includes per-frame `boundingBox` data from the Video Intelligence API's person detection. The crop stage uses these bounding boxes (not individual keypoints) to determine the crop region — compute the enclosing box across all frames, add padding, enforce 9:16. The skeleton stage (Story 3.1) is responsible for transforming keypoint coordinates to cropped-frame coordinates using crop-params.json.
+- The keypoints.json includes per-frame `boundingBox` data from client-side ml5.js MoveNet detection. The crop stage uses these bounding boxes (not individual keypoints) to determine the crop region — compute the enclosing box across all frames, add padding, enforce 9:16. The skeleton stage (Story 3.1) is responsible for transforming keypoint coordinates to cropped-frame coordinates using crop-params.json.
 - For the 9:16 aspect ratio enforcement: compute the bounding box from keypoints, add padding, then adjust to 9:16. If the box is too wide for 9:16, increase height. If too tall, increase width. Center the adjustment around the bounding box center.
 - Thumbnail timing: extract at the midpoint of the video duration, which for a trimmed video should capture the lift itself. Use `ffmpeg.GetDuration()` to get the video length.
 - crop-params.json is a lightweight metadata file that bridges the crop and skeleton stages. If no crop was applied (full frame preserved), this file is NOT written — the skeleton stage checks for its presence and skips coordinate transformation if absent.

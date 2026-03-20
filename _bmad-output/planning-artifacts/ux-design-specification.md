@@ -246,7 +246,7 @@ The skeleton overlay is the visual core. The metrics and phase timeline deepen i
 - Taps submit — one screen, three interactions, done
 
 **2. Processing (Wait):**
-- Screen shows pipeline stage checklist (Trimming → Cropping → Pose estimation → Rendering skeleton → Computing metrics → Generating coaching)
+- Screen shows pipeline stage checklist (Trimming → Cropping → Rendering skeleton → Computing metrics → Generating coaching)
 - Completed stages get a checkmark, current stage is highlighted, future stages are dimmed
 - Lifter puts phone down, loads plates, chalks up
 - When complete, result view replaces progress view automatically (SSE swap)
@@ -573,7 +573,7 @@ flowchart TD
 
 **Purpose:** Communicates processing progress — used both inline on lift list items and full-page on lift detail during processing.
 **Anatomy:**
-- Vertical list of 6 stages: Trimming → Cropping → Pose estimation → Rendering skeleton → Computing metrics → Generating coaching
+- Vertical list of 5 stages: Trimming → Cropping → Rendering skeleton → Computing metrics → Generating coaching
 - Each stage: icon + label
 
 **States per stage:**
@@ -583,7 +583,7 @@ flowchart TD
 
 **Variants:**
 - **Compact** (lift list item): Single line showing current stage name + "3 of 6" count, no full stage list
-- **Full** (detail view during processing): All 6 stages visible as a vertical checklist
+- **Full** (detail view during processing): All 5 stages visible as a vertical checklist
 
 **Interaction:**
 - No user interaction — display only
@@ -662,7 +662,7 @@ flowchart TD
 - Tap entire row to open lift detail
 
 **Anatomy (processing state):**
-- Row layout: lift type + date + compact pipeline indicator (current stage name + "N of 6")
+- Row layout: lift type + date + compact pipeline indicator (current stage name + "N of 5")
 - SSE updates the stage indicator in real-time
 - On completion: row transitions to normal state (thumbnail appears, pipeline indicator removed)
 
@@ -761,7 +761,7 @@ Each component is built when its data source becomes available — no premature 
 
 **Pattern 1: Pipeline Progress (list item)**
 - **Trigger:** Video uploaded, processing begins
-- **Display:** Compact inline indicator on list item — current stage name + "N of 6"
+- **Display:** Compact inline indicator on list item — current stage name + "N of 5"
 - **Update mechanism:** SSE pushes new HTML fragment, HTMX swaps the indicator
 - **Completion:** Entire list item row transitions to normal state (thumbnail + type + date) — no "done" notification, the normal state IS the notification
 

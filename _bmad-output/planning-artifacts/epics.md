@@ -51,9 +51,9 @@ This document provides the complete epic and story breakdown for press-out, deco
 - NFR3: Video playback begins within 1 second of user interaction, as measured by browser performance timing API
 - NFR4: Toggle between clean and skeleton overlay video switches playback within 500 milliseconds, as measured by browser performance timing API
 - NFR5: Pipeline stage progress updates reach the browser within 1 second of each stage completing, as measured by server-side SSE dispatch timestamps
-- NFR6: System handles Video Intelligence API unavailability gracefully, reporting the failure without crashing the pipeline
+- NFR6: System handles missing keypoints.json gracefully (pose estimation failed or was skipped client-side), continuing the pipeline without crashing
 - NFR7: System handles LLM API unavailability gracefully, completing video processing without coaching feedback or phase segmentation
-- NFR8: System operates with no external infrastructure dependencies beyond Video Intelligence and LLM APIs
+- NFR8: System operates with no external infrastructure dependencies beyond the LLM API (Claude Code) and ml5.js CDN
 - NFR9: No user-facing error screens during video processing — all failures degrade to the best available result
 - NFR10: Uploaded videos are persisted before processing begins, ensuring no data loss if processing fails
 - NFR11: A failed pipeline run can be re-triggered on a previously uploaded video without re-uploading
@@ -74,11 +74,11 @@ This document provides the complete epic and story breakdown for press-out, deco
 - FFmpeg system dependency: Required for video trim, crop, skeleton rendering, and thumbnail extraction via `exec.Command`
 - Pipeline Stage interface: All stages implement `Stage` interface with `Name()` and `Run(ctx, StageInput) (StageOutput, error)`
 - Package organization: `cmd/press-out/`, `internal/` (handler, pipeline, storage, sse, pose, claude), `sql/`, `web/`
-- Configuration: Environment variables with defaults (PORT=8080, DATA_DIR=./data, DB_PATH=./data/press-out.db, GOOGLE_APPLICATION_CREDENTIALS required)
+- Configuration: Environment variables with defaults (PORT=8080, DATA_DIR=./data, DB_PATH=./data/press-out.db)
 - Deployment: Makefile-driven (build, test, run), systemd process management, single VPS
 - Logging: Go slog to stdout, structured JSON, captured by systemd journal
 - Build tooling: `go build` + Tailwind standalone CLI + sqlc generate, no npm/node, no JavaScript build step
-- External integrations: Google Cloud Video Intelligence via Go client library, Claude Code via headless subprocess runner
+- External integrations: ml5.js via CDN (client-side pose estimation), Claude Code via headless subprocess runner
 - Thumbnail generation: Extracted from processed video via FFmpeg, stored as `thumbnail.jpg` in lift directory
 
 ### UX Design Requirements
@@ -87,7 +87,7 @@ This document provides the complete epic and story breakdown for press-out, deco
 - UX-DR2: System font stack (`-apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif`) — no web fonts, no loading delay
 - UX-DR3: Typography scale — metric values text-2xl bold (largest on screen), page title text-xl semibold, section headers text-lg medium, body text-sm normal, metric labels text-xs medium, UI chrome text-xs medium
 - UX-DR4: Video Player with Floating Controls — full-width edge-to-edge video element, position relative container, floating speed strip (0.25x/0.5x/1x) at bottom with gradient backdrop (`bg-gradient-to-t from-black/40`), mode badge in bottom-right ("Skeleton"/"Clean"), entire video surface as tap target for toggle, sticky positioning while scrolling
-- UX-DR5: Pipeline Stage Checklist — vertical list of 6 stages (Trimming, Cropping, Pose estimation, Rendering skeleton, Computing metrics, Generating coaching) with three states per stage (pending: dimmed, active: pulsing dot, complete: sage checkmark). Two variants: compact (list item: current stage + "N of 6") and full (detail view: all 6 stages visible)
+- UX-DR5: Pipeline Stage Checklist — vertical list of 5 stages (Trimming, Cropping, Rendering skeleton, Computing metrics, Generating coaching) with three states per stage (pending: dimmed, active: pulsing dot, complete: sage checkmark). Two variants: compact (list item: current stage + "N of 5") and full (detail view: all 5 stages visible). Pose estimation runs client-side before upload and is not part of the server pipeline.
 - UX-DR6: Phase Timeline Bar — horizontal segmented bar, full-width, rounded corners, segments proportional to phase duration, sage gradient palette colors. Tap segment to seek video to phase start, label appears above selected segment (e.g., "2nd Pull — 0.31s"), selected segment highlighted at full opacity with slight scale, others dimmed
 - UX-DR7: Metric Cells in 3x2 grid (grid-cols-3) — six metric-specific variants: pull-to-catch ratio (vertical ratio bar + numeric value, no expand), bar path (mini X-Y trajectory, tap-to-expand with axis labels and phase markers), velocity curve (mini sparkline + peak value, tap-to-expand with phase shading), joint angles (mini stick figure at catch + angle values, tap-to-expand all four positions), phase durations (mini stacked bar + total duration, tap-to-expand with individual ms values), total lift duration (large numeric value, no expand)
 - UX-DR8: Coaching Card — no card container, coaching cue in `text-lg font-semibold` as hero text (first content below video), divider, diagnosis in `text-sm text-gray-500`, left border accent in info color (#9BB0BA). DaisyUI skeleton placeholder while loading, SSE swap when ready
@@ -324,12 +324,12 @@ So that I know the system is working and can estimate when results will be ready
 
 **Given** the lifter is on the lift list page with a processing lift
 **When** a pipeline stage completes
-**Then** the compact pipeline indicator on the list item updates via SSE (current stage name + "N of 6")
+**Then** the compact pipeline indicator on the list item updates via SSE (current stage name + "N of 5")
 **And** the update reaches the browser within 1 second of the stage completing (NFR5)
 
 **Given** the lifter taps into a processing lift
 **When** the lift detail page loads
-**Then** a full vertical stage checklist is displayed with 6 stages (Trimming, Cropping, Pose estimation, Rendering skeleton, Computing metrics, Generating coaching)
+**Then** a full vertical stage checklist is displayed with 5 stages (Trimming, Cropping, Rendering skeleton, Computing metrics, Generating coaching)
 **And** completed stages show a sage checkmark, the active stage shows a pulsing dot, and pending stages are dimmed
 **And** the checklist updates in real-time via SSE as stages complete
 
@@ -395,32 +395,38 @@ So that I can review the lift immediately without scrubbing through setup footag
 **And** the stage returns an error to the orchestrator
 **And** the orchestrator skips the stage and passes the original video forward (FR7)
 
-### Story 2.4: Pose Estimation via Video Intelligence API
+### Story 2.4: Client-Side Pose Estimation & Upload
 
 As a lifter,
-I want the system to detect my body positions from the video,
+I want the system to detect my body positions from the video before uploading,
 So that my joint movements can be used for cropping, visualization, and analysis.
 
 **Acceptance Criteria:**
 
-**Given** the pipeline reaches the pose estimation stage with a trimmed (or original) video
-**When** the pose stage runs
-**Then** the system sends video to the Google Cloud Video Intelligence API via the Go client library
-**And** keypoint coordinates (joints, limbs) are received for each frame (FR8)
-**And** the keypoint data is saved as keypoints.json in the lift-ID directory
+**Given** the lifter selects a video in the upload modal
+**When** the video is selected
+**Then** the browser loads ml5.js bodyPose (MoveNet SINGLEPOSE_THUNDER) and processes the video frame-by-frame at 30fps on a canvas
+**And** a progress indicator shows pose estimation progress (e.g., "Processing frame 120 / 360")
+**And** 17 COCO-format keypoints are detected per frame (FR8)
+**And** keypoint coordinates are normalized (0-1 relative to video dimensions)
+**And** keypoint smoothing (7-frame averaging window) is applied to reduce jitter
 
-**Given** the Video Intelligence API is unavailable or returns an error
-**When** the pose stage attempts to connect
-**Then** the error is logged with slog (lift_id, stage, error attributes)
-**And** the stage returns an error to the orchestrator
-**And** the orchestrator skips the stage gracefully (NFR6)
-**And** downstream stages that depend on keypoints (crop, skeleton, metrics) are also skipped
+**Given** client-side pose estimation completes
+**When** the lifter selects a lift type and taps submit
+**Then** the upload sends both the video file and keypoints.json as multipart form fields
+**And** the server stores keypoints.json in the lift-ID directory alongside original.mp4
+**And** the server pipeline starts with keypoints.json already available for downstream stages (crop, skeleton, metrics)
+
+**Given** client-side pose estimation fails or detects no poses
+**When** the upload proceeds
+**Then** the video is still uploaded without keypoints.json
+**And** downstream stages that depend on keypoints handle the missing file gracefully (FR6)
 **And** no error screen is shown to the lifter
 
-**Given** the video contains partial occlusion or variable lighting
-**When** the pose stage processes the frames
-**Then** keypoints are extracted with the best available confidence
-**And** low-confidence keypoints are included in the output (graceful degradation over omission)
+**Given** the upload completes and the pipeline starts
+**When** the trim stage runs
+**Then** the video is trimmed as in Story 2.3
+**And** the pipeline continues with cropping, skeleton, metrics, and coaching stages
 
 ### Story 2.5: Auto-Crop to Lifter
 

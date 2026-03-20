@@ -1,0 +1,519 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Pose Estimation Spike - ml5.js</title>
+  <script src="https://unpkg.com/ml5@1/dist/ml5.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, sans-serif; background: #1a1a2e; color: #eee; padding: 20px; }
+    h1 { font-size: 1.4rem; margin-bottom: 16px; }
+    .controls { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 16px; }
+    .controls label {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 10px 18px; background: #16213e; border: 2px dashed #0f3460;
+      border-radius: 8px; cursor: pointer; font-size: 0.95rem;
+    }
+    .controls label:hover { border-color: #e94560; }
+    .controls input[type="file"] { display: none; }
+    .controls button {
+      padding: 10px 18px; background: #e94560; color: #fff; border: none;
+      border-radius: 8px; cursor: pointer; font-size: 0.95rem;
+    }
+    .controls button:disabled { opacity: 0.4; cursor: not-allowed; }
+    .controls select {
+      padding: 10px 12px; background: #16213e; color: #eee; border: 1px solid #0f3460;
+      border-radius: 8px; font-size: 0.95rem;
+    }
+    #status { margin-bottom: 12px; font-size: 0.9rem; color: #aaa; min-height: 1.2em; }
+    .progress-bar { width: 100%; height: 6px; background: #16213e; border-radius: 3px; margin-bottom: 16px; overflow: hidden; }
+    .progress-bar .fill { height: 100%; background: #e94560; width: 0%; transition: width 0.15s; }
+    .video-wrap { position: relative; display: inline-block; background: #000; border-radius: 8px; overflow: hidden; }
+    .video-wrap video { display: block; max-width: 100%; }
+    .video-wrap canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
+    .stats { margin-top: 16px; font-size: 0.85rem; color: #aaa; }
+    .stats span { color: #e94560; font-weight: 600; }
+    .playback { display: flex; gap: 12px; align-items: center; margin-top: 12px; flex-wrap: wrap; }
+    .playback button {
+      padding: 8px 14px; background: #0f3460; color: #fff; border: none;
+      border-radius: 6px; cursor: pointer; font-size: 0.85rem;
+    }
+    .playback button:hover { background: #e94560; }
+    .playback input[type="range"] { flex: 1; min-width: 200px; }
+    #debug-log {
+      margin-top: 16px; max-height: 200px; overflow: auto;
+      background: #0d1117; padding: 12px; border-radius: 8px;
+      font-family: monospace; font-size: 0.75rem; white-space: pre-wrap; color: #7ee787;
+    }
+    #json-output {
+      margin-top: 16px; max-height: 300px; overflow: auto;
+      background: #16213e; padding: 12px; border-radius: 8px;
+      font-family: monospace; font-size: 0.75rem; white-space: pre; display: none;
+    }
+  </style>
+</head>
+<body>
+  <h1>ml5.js Pose Estimation Spike</h1>
+
+  <div class="controls">
+    <label>
+      Choose video
+      <input type="file" id="file-input" accept="video/mp4,video/quicktime,.mp4,.mov">
+    </label>
+    <select id="model-select">
+      <option value="MoveNet">MoveNet (17 keypoints, fast)</option>
+      <option value="BlazePose">BlazePose (33 keypoints, precise)</option>
+    </select>
+    <button id="run-btn" disabled>Run Pose Estimation</button>
+    <button id="export-btn" disabled>Export JSON</button>
+  </div>
+
+  <div id="status">Select a video to begin.</div>
+  <div class="progress-bar"><div class="fill" id="progress-fill"></div></div>
+
+  <div class="video-wrap" id="video-wrap">
+    <video id="video" muted playsinline></video>
+    <canvas id="canvas"></canvas>
+  </div>
+
+  <div class="playback" id="playback-controls" style="display:none;">
+    <button id="play-btn">Play</button>
+    <button id="pause-btn">Pause</button>
+    <input type="range" id="scrubber" min="0" max="100" value="0" step="1">
+    <span id="frame-label" style="font-size:0.85rem; color:#aaa;">0 / 0</span>
+    <label style="font-size:0.85rem; color:#aaa; display:flex; align-items:center; gap:6px;">
+      Offset <input type="range" id="sync-offset" min="-500" max="500" value="0" step="50" style="width:100px;">
+      <span id="offset-label">0ms</span>
+    </label>
+  </div>
+
+  <div class="stats" id="stats"></div>
+  <div id="debug-log"></div>
+  <div id="json-output"></div>
+
+  <script>
+    const fileInput = document.getElementById("file-input");
+    const modelSelect = document.getElementById("model-select");
+    const runBtn = document.getElementById("run-btn");
+    const exportBtn = document.getElementById("export-btn");
+    const statusEl = document.getElementById("status");
+    const progressFill = document.getElementById("progress-fill");
+    const canvas = document.getElementById("canvas");
+    const ctx = canvas.getContext("2d");
+    const video = document.getElementById("video");
+    // Offscreen canvas for feeding frames to ml5 during processing
+    const offscreen = document.createElement("canvas");
+    const offCtx = offscreen.getContext("2d");
+    const statsEl = document.getElementById("stats");
+    const playbackControls = document.getElementById("playback-controls");
+    const scrubber = document.getElementById("scrubber");
+    const frameLabel = document.getElementById("frame-label");
+    const jsonOutput = document.getElementById("json-output");
+    const debugLog = document.getElementById("debug-log");
+
+    let allFrames = [];
+    let connections = [];
+    let bodyPose = null;
+    let processing = false;
+
+    function log(msg) {
+      const line = new Date().toLocaleTimeString() + " " + msg;
+      debugLog.textContent += line + "\n";
+      debugLog.scrollTop = debugLog.scrollHeight;
+      console.log(msg);
+    }
+
+    const SKELETON_COLORS = [
+      "#e94560", "#f5a623", "#7ed321", "#4a90d9", "#bd10e0",
+      "#50e3c2", "#b8e986", "#f8e71c", "#d0021b", "#9013fe"
+    ];
+
+    fileInput.addEventListener("change", () => {
+      if (fileInput.files.length > 0) {
+        const file = fileInput.files[0];
+        video.src = URL.createObjectURL(file);
+        runBtn.disabled = false;
+        allFrames = [];
+        exportBtn.disabled = true;
+        playbackControls.style.display = "none";
+        statsEl.textContent = "";
+        jsonOutput.style.display = "none";
+        debugLog.textContent = "";
+        progressFill.style.width = "0%";
+
+        video.onloadedmetadata = () => {
+          canvas.width = video.videoWidth;
+          canvas.height = video.videoHeight;
+          offscreen.width = video.videoWidth;
+          offscreen.height = video.videoHeight;
+          log("Video: " + video.videoWidth + "x" + video.videoHeight + ", duration=" + video.duration.toFixed(2) + "s");
+          statusEl.textContent = "Video loaded: " + file.name + ". Click Run.";
+        };
+      }
+    });
+
+    runBtn.addEventListener("click", async () => {
+      if (processing) return;
+      processing = true;
+      runBtn.disabled = true;
+      exportBtn.disabled = true;
+      playbackControls.style.display = "none";
+      allFrames = [];
+
+      const modelName = modelSelect.value;
+      statusEl.textContent = "Loading " + modelName + " model...";
+      log("Loading model: " + modelName);
+      progressFill.style.width = "0%";
+
+      try {
+        bodyPose = await loadModel(modelName);
+        connections = bodyPose.getSkeleton();
+        log("Model loaded. Skeleton connections: " + connections.length);
+      } catch (e) {
+        log("ERROR loading model: " + e.message);
+        statusEl.textContent = "Failed to load model: " + e.message;
+        processing = false;
+        runBtn.disabled = false;
+        return;
+      }
+
+      statusEl.textContent = "Model loaded. Extracting poses frame by frame...";
+
+      const fps = 30;
+      const step = 1 / fps;
+      const duration = video.duration;
+      const totalFrames = Math.floor(duration * fps);
+      let frameIdx = 0;
+      const startTime = performance.now();
+
+      log("Starting extraction: " + totalFrames + " frames at " + fps + "fps");
+
+      for (let t = 0; t < duration; t += step) {
+        await seekTo(t);
+        // Small delay to ensure the frame is decoded
+        await sleep(30);
+        // Draw to offscreen canvas for ml5 detection
+        offCtx.drawImage(video, 0, 0, offscreen.width, offscreen.height);
+
+        let results;
+        try {
+          results = await detectOnce(offscreen);
+        } catch(e) {
+          log("ERROR detect at t=" + t.toFixed(2) + ": " + e);
+          results = [];
+        }
+
+        const pose = results.length > 0 ? results[0] : null;
+
+        if (frameIdx < 3 || frameIdx % 20 === 0) {
+          log("Frame " + frameIdx + " t=" + t.toFixed(2) + "s: " +
+            (pose ? pose.keypoints.length + " keypoints, confidence=" +
+              (pose.keypoints[0] ? pose.keypoints[0].confidence.toFixed(3) : "?") +
+              ", sample kp: " + (pose.keypoints[0] ? pose.keypoints[0].name + " (" + pose.keypoints[0].x.toFixed(1) + "," + pose.keypoints[0].y.toFixed(1) + ")" : "none")
+            : "NO POSE DETECTED"));
+        }
+
+        const frame = {
+          timeOffsetMs: Math.round(t * 1000),
+          boundingBox: pose && pose.box ? normBox(pose.box, video.videoWidth, video.videoHeight) : null,
+          keypoints: pose ? pose.keypoints.map(kp => ({
+            name: kp.name,
+            x: kp.x / video.videoWidth,
+            y: kp.y / video.videoHeight,
+            confidence: kp.confidence
+          })) : []
+        };
+        allFrames.push(frame);
+
+        // Draw current frame with skeleton
+        drawFrame(pose);
+
+        frameIdx++;
+        const pct = Math.round((frameIdx / totalFrames) * 100);
+        progressFill.style.width = pct + "%";
+        const elapsed = ((performance.now() - startTime) / 1000).toFixed(1);
+        statusEl.textContent = "Processing frame " + frameIdx + " / " + totalFrames +
+          " (" + pct + "%) - " + elapsed + "s elapsed";
+      }
+
+      const totalTime = ((performance.now() - startTime) / 1000).toFixed(1);
+      statusEl.textContent = "Done! " + allFrames.length + " frames processed in " + totalTime + "s";
+      log("DONE: " + allFrames.length + " frames in " + totalTime + "s");
+
+      const framesWithPose = allFrames.filter(f => f.keypoints.length > 0).length;
+      log("Frames with pose: " + framesWithPose + " / " + allFrames.length);
+
+      statsEl.innerHTML = "Frames: <span>" + allFrames.length + "</span> | " +
+        "With pose: <span>" + framesWithPose + "</span> | " +
+        "Duration: <span>" + duration.toFixed(1) + "s</span> | " +
+        "FPS sampled: <span>" + fps + "</span> | " +
+        "Model: <span>" + modelName + "</span> | " +
+        "Time: <span>" + totalTime + "s</span>";
+
+      // Enable playback
+      playbackControls.style.display = "flex";
+      scrubber.max = allFrames.length - 1;
+      scrubber.value = 0;
+      frameLabel.textContent = "1 / " + allFrames.length;
+      exportBtn.disabled = false;
+      processing = false;
+      runBtn.disabled = false;
+
+      // Show first frame
+      showProcessedFrame(0);
+    });
+
+    function loadModel(name) {
+      return new Promise((resolve, reject) => {
+        try {
+          const opts = name === "MoveNet"
+            ? { modelType: "SINGLEPOSE_THUNDER" }
+            : {};
+          const m = ml5.bodyPose(name, opts, () => {
+            log("ml5.bodyPose callback fired");
+            resolve(m);
+          });
+        } catch (e) {
+          reject(e);
+        }
+      });
+    }
+
+    function seekTo(time) {
+      return new Promise((resolve) => {
+        if (Math.abs(video.currentTime - time) < 0.01) {
+          resolve();
+          return;
+        }
+        const handler = () => {
+          video.removeEventListener("seeked", handler);
+          resolve();
+        };
+        video.addEventListener("seeked", handler);
+        video.currentTime = time;
+      });
+    }
+
+    function sleep(ms) {
+      return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    function detectOnce(source) {
+      return new Promise((resolve, reject) => {
+        try {
+          bodyPose.detect(source, (results) => {
+            resolve(results || []);
+          });
+        } catch(e) {
+          reject(e);
+        }
+      });
+    }
+
+    function normBox(box, w, h) {
+      if (!box) return { left: 0, top: 0, right: 1, bottom: 1 };
+      return {
+        left: (box.xMin || 0) / w,
+        top: (box.yMin || 0) / h,
+        right: (box.xMax || w) / w,
+        bottom: (box.yMax || h) / h
+      };
+    }
+
+    function drawFrame(pose) {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      if (!pose || !pose.keypoints) return;
+      drawSkeleton(pose.keypoints, connections);
+      drawKeypoints(pose.keypoints);
+    }
+
+    function drawSkeleton(keypoints, conns) {
+      for (let i = 0; i < conns.length; i++) {
+        const aIdx = conns[i][0];
+        const bIdx = conns[i][1];
+        if (aIdx >= keypoints.length || bIdx >= keypoints.length) continue;
+        const a = keypoints[aIdx];
+        const b = keypoints[bIdx];
+        if (a && b && a.confidence > 0.15 && b.confidence > 0.15) {
+          ctx.beginPath();
+          ctx.moveTo(a.x, a.y);
+          ctx.lineTo(b.x, b.y);
+          ctx.strokeStyle = SKELETON_COLORS[i % SKELETON_COLORS.length];
+          ctx.lineWidth = 3;
+          ctx.stroke();
+        }
+      }
+    }
+
+    function drawKeypoints(keypoints) {
+      for (const kp of keypoints) {
+        if (kp.confidence > 0.15) {
+          ctx.beginPath();
+          ctx.arc(kp.x, kp.y, 5, 0, 2 * Math.PI);
+          ctx.fillStyle = "#fff";
+          ctx.fill();
+          ctx.strokeStyle = "#e94560";
+          ctx.lineWidth = 2;
+          ctx.stroke();
+        }
+      }
+    }
+
+    // Find the closest processed frame index for a given time (binary search)
+    function findClosestFrame(timeMs) {
+      let lo = 0, hi = allFrames.length - 1;
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (allFrames[mid].timeOffsetMs < timeMs) lo = mid + 1;
+        else hi = mid;
+      }
+      if (lo > 0 && Math.abs(allFrames[lo - 1].timeOffsetMs - timeMs) < Math.abs(allFrames[lo].timeOffsetMs - timeMs)) {
+        return lo - 1;
+      }
+      return lo;
+    }
+
+    // Smooth keypoints by averaging over a window of neighboring frames
+    const SMOOTH_WINDOW = 3; // frames on each side (total window = 2*3+1 = 7)
+
+    function getSmoothedKeypoints(centerIdx) {
+      const center = allFrames[centerIdx];
+      if (!center || center.keypoints.length === 0) return [];
+
+      const numKps = center.keypoints.length;
+      const sums = new Array(numKps);
+      const counts = new Array(numKps).fill(0);
+      for (let k = 0; k < numKps; k++) {
+        sums[k] = { x: 0, y: 0, confidence: 0 };
+      }
+
+      const lo = Math.max(0, centerIdx - SMOOTH_WINDOW);
+      const hi = Math.min(allFrames.length - 1, centerIdx + SMOOTH_WINDOW);
+
+      for (let i = lo; i <= hi; i++) {
+        const f = allFrames[i];
+        if (f.keypoints.length !== numKps) continue;
+        for (let k = 0; k < numKps; k++) {
+          const kp = f.keypoints[k];
+          if (kp.confidence > 0.15) {
+            sums[k].x += kp.x;
+            sums[k].y += kp.y;
+            sums[k].confidence += kp.confidence;
+            counts[k]++;
+          }
+        }
+      }
+
+      return center.keypoints.map((kp, k) => {
+        if (counts[k] === 0) return kp;
+        return {
+          name: kp.name,
+          x: sums[k].x / counts[k],
+          y: sums[k].y / counts[k],
+          confidence: sums[k].confidence / counts[k]
+        };
+      });
+    }
+
+    // Draw skeleton overlay for a given frame index (with smoothing)
+    function drawOverlay(idx) {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      const smoothed = getSmoothedKeypoints(idx);
+      if (smoothed.length === 0) return;
+      const pixelKps = smoothed.map(kp => ({
+        ...kp,
+        x: kp.x * canvas.width,
+        y: kp.y * canvas.height
+      }));
+      drawSkeleton(pixelKps, connections);
+      drawKeypoints(pixelKps);
+    }
+
+    // Playback: native video + requestVideoFrameCallback or rAF overlay
+    let playing = false;
+    let rafId = null;
+    let syncOffsetMs = 0;
+    const useVFC = "requestVideoFrameCallback" in HTMLVideoElement.prototype;
+    const syncSlider = document.getElementById("sync-offset");
+    const offsetLabel = document.getElementById("offset-label");
+
+    syncSlider.addEventListener("input", () => {
+      syncOffsetMs = parseInt(syncSlider.value);
+      offsetLabel.textContent = syncOffsetMs + "ms";
+    });
+
+    function renderLoop(now, metadata) {
+      if (!playing) return;
+      // Use precise mediaTime from VFC when available, else video.currentTime
+      const timeS = metadata ? metadata.mediaTime : video.currentTime;
+      const timeMs = timeS * 1000 + syncOffsetMs;
+      const idx = findClosestFrame(timeMs);
+      drawOverlay(idx);
+      scrubber.value = idx;
+      frameLabel.textContent = (idx + 1) + " / " + allFrames.length;
+      if (useVFC) {
+        video.requestVideoFrameCallback(renderLoop);
+      } else {
+        rafId = requestAnimationFrame(() => renderLoop());
+      }
+    }
+
+    document.getElementById("play-btn").addEventListener("click", () => {
+      if (playing) return;
+      playing = true;
+      video.play();
+      if (useVFC) {
+        video.requestVideoFrameCallback(renderLoop);
+      } else {
+        renderLoop();
+      }
+    });
+
+    document.getElementById("pause-btn").addEventListener("click", () => {
+      playing = false;
+      video.pause();
+      if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
+    });
+
+    // Scrubber: seek video and draw that frame
+    scrubber.addEventListener("input", () => {
+      const idx = parseInt(scrubber.value);
+      if (idx < 0 || idx >= allFrames.length) return;
+      playing = false;
+      video.pause();
+      if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
+      const t = allFrames[idx].timeOffsetMs / 1000;
+      video.currentTime = t;
+      const handler = () => {
+        video.removeEventListener("seeked", handler);
+        drawOverlay(idx);
+        frameLabel.textContent = (idx + 1) + " / " + allFrames.length;
+      };
+      video.addEventListener("seeked", handler);
+    });
+
+    exportBtn.addEventListener("click", () => {
+      const result = {
+        sourceWidth: video.videoWidth,
+        sourceHeight: video.videoHeight,
+        frames: allFrames
+      };
+      const json = JSON.stringify(result, null, 2);
+
+      // Show in page
+      jsonOutput.textContent = json;
+      jsonOutput.style.display = "block";
+
+      // Download
+      const blob = new Blob([json], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "keypoints.json";
+      a.click();
+      URL.revokeObjectURL(url);
+    });
+  </script>
+</body>
+</html>

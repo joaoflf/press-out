@@ -1,9 +1,7 @@
 # Press-Out - Claude Code Context
 
-## GCP Credentials
+## Pose Estimation
 
-Google Cloud Video Intelligence API credentials are pre-configured on the machine.
-The `GOOGLE_APPLICATION_CREDENTIALS` env var points to `~/.config/press-out/gcp-sa.json`.
-The Go client library reads this automatically — no code needs to load or reference the key file.
-
-Setup instructions: `docs/gcp-credentials-setup.md`
+Pose estimation runs client-side in the browser via ml5.js (MoveNet SINGLEPOSE_THUNDER).
+The browser processes the video frame-by-frame, then uploads both the video file and
+`keypoints.json` to the server. No cloud API or credentials needed.

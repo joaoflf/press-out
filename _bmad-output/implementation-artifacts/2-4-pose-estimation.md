@@ -1,154 +1,146 @@
-# Story 2.4: Pose Estimation via Video Intelligence API
+# Story 2.4: Client-Side Pose Estimation & Upload
 
-Status: approved
+Status: draft
 
 ## Story
 
 As a lifter,
-I want the system to detect my body positions from the video,
+I want the system to detect my body positions from the video before uploading,
 so that my joint movements can be used for cropping, visualization, and analysis.
 
 ## Acceptance Criteria (BDD)
 
-1. **Given** the pipeline reaches the pose estimation stage with a trimmed (or original) video, **When** the pose stage runs, **Then** the system sends the video to a pose estimation provider via a provider-agnostic `PoseClient` interface, **And** keypoint coordinates (17 COCO-format body landmarks) are received per timestamp (FR8), **And** the keypoint data is saved as `keypoints.json` in the lift-ID directory
+1. **Given** the lifter selects a video in the upload modal, **When** the video is selected, **Then** the browser loads ml5.js bodyPose (MoveNet SINGLEPOSE_THUNDER) and processes the video frame-by-frame at 30fps on a canvas, **And** a progress indicator shows pose estimation progress (e.g., "Processing frame 120 / 360"), **And** 17 COCO-format keypoints are detected per frame (FR8), **And** keypoint coordinates are normalized (0-1 relative to video dimensions), **And** keypoint smoothing (7-frame averaging window) is applied to reduce jitter
 
-2. **Given** the pose estimation provider is unavailable or returns an error, **When** the pose stage attempts to call it, **Then** the error is logged with slog (`lift_id`, `stage`, `error` attributes), **And** the stage returns an error to the orchestrator, **And** the orchestrator marks it skipped and continues (NFR6), **And** downstream stages that depend on keypoints (crop, skeleton, metrics) handle the missing `keypoints.json` gracefully, **And** no error screen is shown to the lifter
+2. **Given** client-side pose estimation completes, **When** the lifter selects a lift type and taps submit, **Then** the upload sends both the video file and keypoints.json as multipart form fields, **And** the server stores keypoints.json in the lift-ID directory alongside original.mp4, **And** the server pipeline starts with keypoints.json already available for downstream stages (crop, skeleton, metrics)
 
-3. **Given** the video contains partial occlusion or variable lighting, **When** the pose stage processes the video, **Then** keypoints are extracted with the best available confidence, **And** low-confidence keypoints are included in the output with their confidence scores (graceful degradation over omission)
+3. **Given** client-side pose estimation fails or detects no poses, **When** the upload proceeds, **Then** the video is still uploaded without keypoints.json, **And** downstream stages that depend on keypoints handle the missing file gracefully (FR6), **And** no error screen is shown to the lifter
 
-4. **Given** multiple persons are detected in the video, **When** the pose stage processes the results, **Then** the system selects the primary lifter (person with the largest average bounding box area across all frames), **And** only that person's keypoints are written to `keypoints.json`
-
-5. **Given** no persons are detected in the video, **When** the pose stage completes, **Then** the stage returns an error (no keypoints to write), **And** the orchestrator handles it as a skipped stage
+4. **Given** the upload completes and the pipeline starts, **When** the trim stage runs, **Then** the video is trimmed as in Story 2.3, **And** the pipeline continues with cropping, skeleton, metrics, and coaching stages
 
 ## Prerequisites
 
-- Story 2.2 (FFmpeg Integration & Verification) must be complete — this story uses `ffmpeg.RunProbe()` to get source video dimensions.
-- Story 2.3 (Auto-Trim) should be complete — pose estimation runs on the trimmed video for lower API cost and better accuracy.
-- Google Cloud project with Video Intelligence API enabled.
-- Service account credentials configured via `GOOGLE_APPLICATION_CREDENTIALS` environment variable (standard Google Cloud Application Default Credentials).
+- Story 1.2 (Upload a Lift Video) must be complete — this story modifies the upload handler and modal.
+- Story 2.2 (FFmpeg Integration & Verification) must be complete — the pipeline uses FFmpeg for trimming.
+- Story 2.3 (Auto-Trim) must be complete — the pipeline runs the trim stage after upload.
 
 ## Tasks / Subtasks
 
-### Task 1: Add `GetDimensions` helper to ffmpeg package
+### Task 1: Add ml5.js pose estimation to upload flow
 
-- [ ] Add `GetDimensions(ctx, input) (width, height int, err error)` to `internal/ffmpeg/ffmpeg.go`
-- [ ] Implementation: run `ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=s=x:p=0 input` and parse `WxH` output
-- [ ] Add unit test in `ffmpeg_test.go` with the real test video (`testdata/videos/sample-lift.mp4`)
+- [ ] Load ml5.js via CDN (`https://unpkg.com/ml5@1/dist/ml5.js`) in `web/templates/layouts/base.html` (or conditionally in upload modal)
+- [ ] Create pose estimation JavaScript in `web/static/app.js` (or a dedicated `pose.js`):
+  - [ ] On video file selection: load video into a hidden `<video>` element, create an offscreen `<canvas>`
+  - [ ] Initialize `ml5.bodyPose("MoveNet", { modelType: "SINGLEPOSE_THUNDER" })`
+  - [ ] Process frames sequentially: seek to each frame (1/30s intervals), draw to canvas, call `bodyPose.detect(canvas)`
+  - [ ] Normalize keypoint coordinates to 0-1 range (divide by video dimensions)
+  - [ ] Apply 7-frame smoothing window (average x, y, confidence across neighboring frames for keypoints with confidence > 0.15)
+  - [ ] Compute per-frame bounding box from ml5's `box` property (normalize to 0-1)
+  - [ ] Build `keypoints.json` matching `pose.Result` format: `{ sourceWidth, sourceHeight, frames[]{timeOffsetMs, boundingBox{left,top,right,bottom}, keypoints[]{name, x, y, confidence}} }`
+  - [ ] Store the JSON blob in memory until form submission
+- [ ] Reference implementation: `web/static/pose-spike.html` (working spike with all the above logic)
 
-### Task 2: Define provider-agnostic PoseClient interface and types
+### Task 2: Add pose estimation progress UI to upload modal
 
-- [ ] Create `internal/pose/client.go` with:
-  - `Client` interface: `DetectPose(ctx context.Context, videoData []byte) (*Result, error)` + `Close() error`
-  - `Result` struct: `SourceWidth int`, `SourceHeight int`, `Frames []Frame`
-  - `BoundingBox` struct: `Left float64`, `Top float64`, `Right float64`, `Bottom float64` (all normalized 0-1)
-  - `Frame` struct: `TimeOffsetMs int64`, `BoundingBox BoundingBox`, `Keypoints []Keypoint`
-  - `Keypoint` struct: `Name string`, `X float64` (normalized 0-1), `Y float64` (normalized 0-1), `Confidence float64` (0-1)
-  - JSON struct tags on all fields (these types are serialized to `keypoints.json`)
-  - Named constants for the 17 landmark names: `LandmarkNose`, `LandmarkLeftEye`, `LandmarkRightEye`, `LandmarkLeftEar`, `LandmarkRightEar`, `LandmarkLeftShoulder`, `LandmarkRightShoulder`, `LandmarkLeftElbow`, `LandmarkRightElbow`, `LandmarkLeftWrist`, `LandmarkRightWrist`, `LandmarkLeftHip`, `LandmarkRightHip`, `LandmarkLeftKnee`, `LandmarkRightKnee`, `LandmarkLeftAnkle`, `LandmarkRightAnkle`
-- [ ] `SourceWidth`/`SourceHeight` are NOT populated by `DetectPose` — the caller (pose stage) fills them in from `ffprobe` before writing JSON. `DetectPose` returns only normalized coordinates and frame data.
+- [ ] After video file selection, show a progress indicator in the upload modal
+- [ ] Progress format: "Processing frame N / total" with a progress bar
+- [ ] Lift type selector and submit button remain disabled until pose estimation completes (or fails)
+- [ ] On completion: enable lift type selector and submit button
+- [ ] On failure: enable lift type selector and submit button anyway (video uploads without keypoints)
+- [ ] No "pose estimation failed" error message shown to user — silent degradation
 
-### Task 3: Implement Google Cloud Video Intelligence client
+### Task 3: Modify upload handler to accept keypoints.json
 
-- [ ] Create `internal/pose/videointel.go` implementing `Client` interface
-- [ ] Go dependency: `cloud.google.com/go/videointelligence/apiv1`
-- [ ] Constructor: `NewVideoIntelClient(ctx context.Context) (Client, error)` — creates `videointelligence.NewClient(ctx)` using Application Default Credentials (no API key needed)
-- [ ] `DetectPose` implementation:
-  - Build `AnnotateVideoRequest` with `InputContent: videoData`, `Features: [PERSON_DETECTION]`, `VideoContext.PersonDetectionConfig: {IncludePoseLandmarks: true, IncludeBoundingBoxes: true}`
-  - Call `client.AnnotateVideo(ctx, req)` — returns a long-running operation (LRO)
-  - Wait for completion: `op.Wait(ctx)` — blocks until the API finishes processing (typically 30-120s for a <60s video)
-  - Process response: iterate `AnnotationResults[0].PersonDetectionAnnotations`
-  - **Primary person selection:** if multiple persons detected, select the one whose track has the largest average bounding box area (`(right-left) * (bottom-top)` across all `TimestampedObjects`). Log a warning with the person count.
-  - For each `TimestampedObject` in the selected person's track: extract `TimeOffset` (convert to milliseconds), extract `NormalizedBoundingBox` into `BoundingBox{Left, Top, Right, Bottom}`, iterate `Landmarks` to build `[]Keypoint` with `Name`, `Point.X`, `Point.Y`, `Confidence`
-  - **Landmark name mapping:** normalize API landmark names to COCO-format constants (e.g., if API returns `"LEFT_SHOULDER"`, map to `"left_shoulder"`). This mapping belongs in `videointel.go` — downstream consumers always see consistent names.
-  - Return `&Result{Frames: frames}` (caller fills `SourceWidth`/`SourceHeight`)
-  - Return error if 0 persons detected or 0 landmarks found
-- [ ] `Close` implementation: calls `client.Close()`
-- [ ] Add `internal/pose/videointel_test.go` with unit tests using a mock/stub (do NOT call the real API in unit tests)
+- [ ] In `internal/handler/lift.go` (POST /lifts handler):
+  - [ ] Parse multipart form with existing `video` field + new optional `keypoints` field
+  - [ ] If `keypoints` field is present: read the data, validate it is valid JSON, save to `storage.LiftFile(dataDir, liftID, storage.FileKeypoints)`
+  - [ ] If `keypoints` field is absent: proceed without it (no error)
+  - [ ] Save keypoints.json BEFORE starting the pipeline (like original.mp4 per NFR10)
+- [ ] Server-side validation of keypoints.json:
+  - [ ] Must be valid JSON
+  - [ ] Must have `sourceWidth` and `sourceHeight` as positive integers
+  - [ ] Must have `frames` array (may be empty)
+  - [ ] If validation fails: log warning, discard keypoints, proceed with upload (no error to user)
 
-### Task 4: Implement pose estimation pipeline stage
+### Task 4: Simplify pose package to shared types only
 
-- [ ] Create `internal/pipeline/stages/pose.go`
-- [ ] `PoseStage` struct with `client pose.Client` field
-- [ ] Constructor: `NewPoseStage(client pose.Client) *PoseStage`
-- [ ] `Name()` returns `pipeline.StagePoseEstimation`
-- [ ] Named constants:
-  - `maxInlineVideoBytes = 50 * 1024 * 1024` (50MB — inline content limit for Video Intelligence API)
-  - `poseAPITimeout = 2 * time.Minute` (stage-level timeout for the API call)
-- [ ] `Run()` implementation:
-  1. Read input video bytes: `os.ReadFile(input.VideoPath)`
-  2. Check `len(videoData) > maxInlineVideoBytes` — if exceeded, return error `"video too large for inline pose estimation (%d bytes, max %d)"` (stage skips gracefully)
-  3. Get source dimensions: `ffmpeg.GetDimensions(ctx, input.VideoPath)` — populates `result.SourceWidth`, `result.SourceHeight`
-  4. Create a timeout context: `timeoutCtx, cancel := context.WithTimeout(ctx, poseAPITimeout)` + `defer cancel()`
-  5. Call `client.DetectPose(timeoutCtx, videoData)`
-  6. Set `result.SourceWidth` and `result.SourceHeight` from ffprobe values
-  7. Marshal `result` to JSON with `json.MarshalIndent(result, "", "  ")`
-  8. Write to `storage.LiftFile(input.DataDir, input.LiftID, storage.FileKeypoints)`
-  9. Log frame count and landmark count: `slog.Info("pose estimation complete", "lift_id", ..., "stage", ..., "frames", len(result.Frames), "duration_ms", ...)`
-  10. Return `StageOutput{VideoPath: input.VideoPath}` — pose stage passes the video through unchanged
-- [ ] On any error: return `StageOutput{}, fmt.Errorf("pose: %w", err)` — orchestrator handles skip
-- [ ] Create `internal/pipeline/stages/pose_test.go`:
-  - Test with mock `pose.Client` returning valid keypoints — verify `keypoints.json` written with correct structure
-  - Test with mock `pose.Client` returning error — verify stage returns error
-  - Test `keypoints.json` contains expected fields: `sourceWidth`, `sourceHeight`, `frames[].timeOffsetMs`, `frames[].boundingBox.{left, top, right, bottom}`, `frames[].keypoints[].{name, x, y, confidence}`
-  - Test video exceeding `maxInlineVideoBytes` — verify stage returns error
+- [ ] Rename `internal/pose/client.go` to `internal/pose/pose.go` (or create fresh)
+- [ ] Keep only the types needed for keypoints.json deserialization:
+  - [ ] `Result` struct: `SourceWidth int`, `SourceHeight int`, `Frames []Frame`
+  - [ ] `Frame` struct: `TimeOffsetMs int64`, `BoundingBox BoundingBox`, `Keypoints []Keypoint`
+  - [ ] `BoundingBox` struct: `Left float64`, `Top float64`, `Right float64`, `Bottom float64`
+  - [ ] `Keypoint` struct: `Name string`, `X float64`, `Y float64`, `Confidence float64`
+  - [ ] JSON struct tags on all fields
+  - [ ] Named constants for 17 COCO landmark names
+- [ ] Remove `Client` interface — no server-side pose provider
+- [ ] Remove `internal/pose/videointel.go` and `internal/pose/videointel_test.go`
+- [ ] Remove `internal/pose/videointel_integration_test.go` (if exists)
 
-### Task 5: Fix pipeline stage ordering
+### Task 5: Remove server-side pose pipeline stage
 
-- [ ] In `internal/pipeline/stage.go`, update `DefaultStages()` to put `StagePoseEstimation` BEFORE `StageCropping`:
-  ```
-  Trimming -> Pose estimation -> Cropping -> Rendering skeleton -> Computing metrics -> Generating coaching
-  ```
-- [ ] This is a bug fix — the current order has Cropping before Pose estimation, which is wrong after the Epic 2 restructure
+- [ ] Delete `internal/pipeline/stages/pose.go` and `internal/pipeline/stages/pose_test.go`
+- [ ] In `internal/pipeline/stage.go`: remove `StagePoseEstimation` from `DefaultStages()` — pipeline is now: Trimming → Cropping → Rendering skeleton → Computing metrics → Generating coaching (5 stages)
+- [ ] In `cmd/press-out/main.go`: remove pose client creation, remove `NewPoseStage(client)`, remove `defer poseClient.Close()`
+- [ ] In `internal/config/config.go`: remove `MediaPipeAPIKey` field if still present
 
-### Task 6: Wire pose stage into main.go and update config
+### Task 6: Remove Google Cloud Video Intelligence dependency
 
-- [ ] In `cmd/press-out/main.go`: create `pose.NewVideoIntelClient(ctx)`, pass to `NewPoseStage(client)`, register in pipeline stages list (replacing the `StubStage` for pose estimation)
-- [ ] Add `defer poseClient.Close()` for cleanup
-- [ ] In `internal/config/config.go`: remove `MediaPipeAPIKey` field and `os.Getenv("MEDIAPIPE_API_KEY")` line (`.env.example` is already updated)
-- [ ] Authentication: `GOOGLE_APPLICATION_CREDENTIALS` env var is pre-configured on the machine pointing to a service account JSON key file. The Go client library reads it automatically via Application Default Credentials — no code needed to load or pass credentials. If not set or file missing, `videointelligence.NewClient(ctx)` returns a clear error which propagates as a stage failure.
+- [ ] Run `go mod tidy` to remove `cloud.google.com/go/videointelligence` from `go.mod` / `go.sum`
+- [ ] Verify no remaining imports reference the videointelligence package
+- [ ] Remove `.env.example` reference to `GOOGLE_APPLICATION_CREDENTIALS` (if present)
 
-### Task 7: Integration test with real API
+### Task 7: Update upload form to send keypoints as multipart field
 
-- [ ] Create `internal/pose/videointel_integration_test.go` with build tag `//go:build integration`
-- [ ] Test calls the real Video Intelligence API using `testdata/videos/sample-lift.mp4`
-- [ ] `GOOGLE_APPLICATION_CREDENTIALS` is pre-configured on the machine — no setup needed
-- [ ] Assertions:
-  - `Result` has at least 1 frame
-  - Each frame has `TimeOffsetMs >= 0`
-  - Each frame has a `BoundingBox` with all values in 0.0-1.0 range and `Left < Right`, `Top < Bottom`
-  - Each frame has at least 1 keypoint
-  - All keypoint coordinates are normalized (0.0-1.0 range)
-  - All keypoint confidence values are in 0.0-1.0 range
-  - Log the actual landmark names returned by the API (helps verify COCO name mapping)
-  - Log total frame count and average keypoints per frame
-- [ ] Run with: `go test -tags=integration -v -timeout=3m ./internal/pose/...`
-- [ ] The agent MUST run this test and verify it passes before marking the story complete
-- [ ] This test costs ~$0.10 per run — acceptable for verification
+- [ ] In `web/templates/partials/upload-modal.html`: form must use `multipart/form-data` (already does for video)
+- [ ] JavaScript on form submit: create a `Blob` from the keypoints JSON, append as a form field named `keypoints` with filename `keypoints.json`
+- [ ] If pose estimation failed/skipped: do not include the `keypoints` field
 
-### Task 8: Update architecture and epics docs
+### Task 8: Verification tests
 
-- [ ] In `_bmad-output/planning-artifacts/architecture.md`:
-  - Replace `MEDIAPIPE_API_KEY` references with `GOOGLE_APPLICATION_CREDENTIALS`
-  - Replace "MediaPipe: HTTP API client" with "Google Cloud Video Intelligence: gRPC client via Go client library"
-  - Rename `internal/mediapipe/client.go` to `internal/pose/client.go` + `internal/pose/videointel.go` in the project structure
-  - Update the External Integration Architecture section
-- [ ] In `_bmad-output/planning-artifacts/epics.md`:
-  - Update Story 2.4 title from "Pose Estimation via MediaPipe" to "Pose Estimation via Video Intelligence API"
-  - Update AC text to remove MediaPipe references
+- [ ] **Keypoints test fixture:** Generate `testdata/keypoints-sample.json` from the spike using the real test video (`testdata/videos/sample-lift.mp4`). This fixture is used by all server-side tests.
+
+- [ ] **Go test — upload handler accepts keypoints.json:**
+  - [ ] POST multipart with `video` (sample video) + `keypoints` (fixture JSON) + `lift_type`
+  - [ ] Assert HTTP 200 / redirect
+  - [ ] Assert `original.mp4` saved to lift directory
+  - [ ] Assert `keypoints.json` saved to lift directory
+  - [ ] Assert keypoints.json content matches fixture (valid JSON, has sourceWidth/sourceHeight/frames)
+
+- [ ] **Go test — upload handler without keypoints:**
+  - [ ] POST multipart with `video` + `lift_type` only (no keypoints field)
+  - [ ] Assert upload succeeds
+  - [ ] Assert `keypoints.json` does NOT exist in lift directory
+
+- [ ] **Go test — pipeline runs with pre-existing keypoints.json:**
+  - [ ] Create a lift directory with `original.mp4` + `keypoints.json` (fixture)
+  - [ ] Run pipeline — trim stage executes, keypoints.json remains available for crop stage
+  - [ ] Assert no pose stage runs (stage not in pipeline)
+
+- [ ] **Go test — invalid keypoints.json rejected gracefully:**
+  - [ ] POST multipart with `keypoints` field containing invalid JSON
+  - [ ] Assert upload succeeds (video saved)
+  - [ ] Assert `keypoints.json` NOT saved (invalid data discarded)
+
+- [ ] **ChromeDP test — upload page loads ml5.js:**
+  - [ ] Navigate to lift list page
+  - [ ] Open upload modal
+  - [ ] Assert ml5.js CDN script loaded (no 404 / network error)
+  - [ ] Assert no JavaScript console errors
+  - [ ] Assert pose progress UI elements exist in DOM (hidden initially)
+
+- [ ] **Spike as reference:** `web/static/pose-spike.html` validates that ml5.js MoveNet detects all 17 COCO keypoints with good confidence on the sample weightlifting video. The story integrates this validated logic — it does not re-invent pose detection.
 
 ## Dev Notes
 
-- **Provider choice: Google Cloud Video Intelligence API** — provides `PERSON_DETECTION` feature with `includePoseLandmarks: true`. Returns 17 COCO-format body landmarks per detected person per frame. Async API (long-running operation) — fits naturally since the pipeline already runs in a background goroutine. Authentication via Application Default Credentials (service account key), not API keys.
+- **Spike reference:** `web/static/pose-spike.html` is a working prototype. Copy the core logic (model loading, frame-by-frame extraction, smoothing, JSON export) — do not start from scratch.
 
-- **Why not MediaPipe or Roboflow:** MediaPipe's hosted solutions (PoseTracker, etc.) are WebView/iframe-based, not a REST API callable from a Go backend. Roboflow API had authentication issues and couldn't get inference endpoint working. Google Cloud Video Intelligence is a proper server-side API with an official Go client library.
+- **ml5.js MoveNet:** MoveNet SINGLEPOSE_THUNDER is the model. It's more accurate than SINGLEPOSE_LIGHTNING but still fast (~7s for 12s video at 30fps on desktop). Loaded via `ml5.bodyPose("MoveNet", { modelType: "SINGLEPOSE_THUNDER" })`.
 
-- **Provider-agnostic design:** The `pose.Client` interface allows swapping providers without changing the pipeline stage or downstream consumers. If a better/cheaper provider emerges, implement the interface and swap at wiring time in `main.go`.
+- **Canvas requirement:** The video element must be drawn to a canvas for ml5 detection. A hidden `<video>` element doesn't expose pixel data. The spike uses an offscreen canvas for processing.
 
-- **API pattern:** `videos:annotate` is async. The Go client's `AnnotateVideo()` returns an LRO. Calling `op.Wait(ctx)` blocks the goroutine until completion (30-120s typical for <60s video). Context cancellation propagates correctly for shutdown.
+- **Smoothing:** 7-frame window (3 frames each side). Averages x, y, confidence for keypoints with confidence > 0.15. Reduces jitter significantly in the skeleton overlay.
 
-- **Inline content vs GCS:** The Video Intelligence API accepts video as inline bytes (`InputContent`) or a GCS URI. For MVP, use inline content — a trimmed weightlifting video (5-15 seconds) is typically 3-20MB, well within gRPC limits. If videos exceed limits, a future enhancement can upload to GCS first. This avoids adding GCS bucket infrastructure (NFR8: no external infrastructure beyond the two APIs).
-
-- **keypoints.json schema:**
+- **keypoints.json format:** Identical to what the Video Intelligence API produced — downstream stages (crop, skeleton, metrics) consume it the same way:
   ```json
   {
     "sourceWidth": 1920,
@@ -159,76 +151,60 @@ so that my joint movements can be used for cropping, visualization, and analysis
         "boundingBox": {"left": 0.1, "top": 0.15, "right": 0.75, "bottom": 0.95},
         "keypoints": [
           {"name": "nose", "x": 0.5, "y": 0.3, "confidence": 0.95},
-          {"name": "left_shoulder", "x": 0.45, "y": 0.45, "confidence": 0.92},
-          {"name": "right_shoulder", "x": 0.55, "y": 0.45, "confidence": 0.91}
+          {"name": "left_shoulder", "x": 0.45, "y": 0.45, "confidence": 0.92}
         ]
-      },
-      {
-        "timeOffsetMs": 33,
-        "boundingBox": {"left": 0.1, "top": 0.15, "right": 0.75, "bottom": 0.95},
-        "keypoints": [...]
       }
     ]
   }
   ```
-  - All coordinates are normalized (0.0-1.0 relative to source frame)
-  - `sourceWidth`/`sourceHeight` let consumers denormalize to pixel coordinates
-  - `boundingBox` per frame is the API's person detection box — used by the crop stage (Story 2.5) as the crop region guide
-  - Frames sorted by `timeOffsetMs` ascending
-  - Keypoints per frame include only what the API returns (may be fewer than 17 if some landmarks are not detected for that frame — downstream consumers must handle variable counts)
 
-- **17 COCO-format landmarks:** nose, left_eye, right_eye, left_ear, right_ear, left_shoulder, right_shoulder, left_elbow, right_elbow, left_wrist, right_wrist, left_hip, right_hip, left_knee, right_knee, left_ankle, right_ankle. Sufficient for skeleton rendering, crop bounding box, joint angles, and bar path (via wrist tracking).
+- **17 COCO landmarks:** nose, left_eye, right_eye, left_ear, right_ear, left_shoulder, right_shoulder, left_elbow, right_elbow, left_wrist, right_wrist, left_hip, right_hip, left_knee, right_knee, left_ankle, right_ankle. Same as what Video Intelligence API returned.
 
-- **Primary person selection:** When multiple persons are detected, the stage selects the one with the largest average bounding box area. In a typical weightlifting video, the lifter is the most prominent person in frame. This heuristic is simple and sufficient for MVP.
+- **Primary person:** MoveNet SINGLEPOSE_THUNDER detects only one person by design — no multi-person selection logic needed (unlike the Video Intelligence API which could return multiple person tracks).
 
-- **Pricing (verify against current docs):** ~$0.10/min with first 1000 min/month free. A 10-second trimmed video costs ~$0.02 (minimum 1 minute charge = $0.10) after the free tier.
+- **Pipeline stage count:** Server pipeline is now 5 stages (was 6). "Pose estimation" is removed. Update any hardcoded "6" references to "5" and "N of 6" to "N of 5".
 
-- **Coordinate space:** Keypoints are in the coordinate space of the input video (trimmed or original). The crop stage (Story 2.5) reads these to compute a bounding box. The skeleton stage (Story 3.1) transforms them to cropped-frame coordinates using `crop-params.json`.
+- **What this replaces:** This story replaces the server-side Video Intelligence API approach. The old `internal/pose/videointel.go`, `internal/pipeline/stages/pose.go`, and the `cloud.google.com/go/videointelligence` Go dependency are all removed.
 
-- This story does NOT produce a video output — it writes `keypoints.json` as a data artifact. The stage returns `StageOutput{VideoPath: input.VideoPath}` to pass the video through unchanged.
-
-### Verification Note
-
-The Google Cloud Video Intelligence API details in this story are based on documentation available through May 2025. Before implementation, verify:
-1. The API is still available and not deprecated
-2. The Go client library package path: `cloud.google.com/go/videointelligence/apiv1`
-3. The exact landmark names returned by the API (may differ slightly from COCO conventions)
-4. Current pricing at https://cloud.google.com/video-intelligence/pricing
-5. Inline content size limits for the gRPC client (should handle 20MB+ but verify)
+- **Coordinate space:** Keypoints are in the coordinate space of the original video (before trim/crop). This is the same as before — crop stage reads these to compute a bounding box, skeleton stage transforms them to cropped-frame coordinates using `crop-params.json`.
 
 ### Architecture Compliance
 
-- Implements `pipeline.Stage` interface: `Name() string` + `Run(ctx, StageInput) (StageOutput, error)`
-- Uses `storage.LiftFile()` for output path construction
-- Returns errors on failure, never panics
-- Logs with `slog` using standard attributes: `lift_id`, `stage`, `duration_ms`, `error`
-- Graceful degradation: API failure causes stage error, orchestrator skips, downstream stages handle missing `keypoints.json`
+- Upload handler uses `storage.LiftFile()` for keypoints.json output path
+- Pipeline runs without a pose stage — trim → crop → skeleton → metrics → coaching
+- Graceful degradation: missing keypoints.json means crop/skeleton/metrics stages skip or preserve full frame
+- Logs with `slog` using standard attributes: `lift_id`, `stage`, `error`
+- ChromeDP browser verification tests for upload page changes
 
 ### Project Structure Notes
 
 New files to create:
-- `internal/pose/client.go` — provider-agnostic PoseClient interface and types
-- `internal/pose/videointel.go` — Google Cloud Video Intelligence implementation
-- `internal/pose/videointel_test.go` — tests (with mock client, no real API calls)
-- `internal/pipeline/stages/pose.go` — pose estimation pipeline stage
-- `internal/pipeline/stages/pose_test.go` — tests
+- `testdata/keypoints-sample.json` — test fixture generated from spike
 
 Files to modify:
-- `internal/ffmpeg/ffmpeg.go` — add `GetDimensions()` helper
-- `internal/ffmpeg/ffmpeg_test.go` — test for `GetDimensions()`
-- `internal/pipeline/stage.go` — fix stage ordering (pose before crop)
-- `internal/config/config.go` — remove `MediaPipeAPIKey`
-- `cmd/press-out/main.go` — wire pose client and stage
+- `web/static/app.js` — add pose estimation logic (from spike)
+- `web/templates/partials/upload-modal.html` — add progress UI, keypoints form field
+- `web/templates/layouts/base.html` — add ml5.js CDN script
+- `internal/handler/lift.go` — accept keypoints multipart field
+- `internal/handler/lift_test.go` — upload handler tests with keypoints
+- `internal/pose/client.go` → rename to `internal/pose/pose.go`, keep types only
+- `internal/pipeline/stage.go` — remove StagePoseEstimation from DefaultStages
+- `cmd/press-out/main.go` — remove pose client wiring
+
+Files to delete:
+- `internal/pose/videointel.go`
+- `internal/pose/videointel_test.go`
+- `internal/pose/videointel_integration_test.go` (if exists)
+- `internal/pipeline/stages/pose.go`
+- `internal/pipeline/stages/pose_test.go`
 
 ### References
 
-- [Source: architecture.md#Pipeline Stage Interface] — Stage interface definition
+- [Source: architecture.md#External Integration Architecture] — ml5.js MoveNet integration
 - [Source: architecture.md#Data Architecture] — keypoints.json in lift directory structure
-- [Source: architecture.md#Process Patterns] — graceful degradation
-- [Source: architecture.md#External Integration Architecture] — external API client pattern
 - [Source: epics.md#Story 2.4] — acceptance criteria
 - [Source: epics.md#FR8] — body keypoint detection
-- [Source: epics.md#NFR6] — external API unavailability handling
+- [Source: web/static/pose-spike.html] — working spike prototype
 
 ## Dev Agent Record
 
