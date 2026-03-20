@@ -802,6 +802,161 @@ func TestHandleDeleteLift_NoOrphanedFiles(t *testing.T) {
 	}
 }
 
+// --- Story 2.4: Keypoints upload tests ---
+
+func createMultipartRequestWithKeypoints(t *testing.T, filename, liftType string, content []byte, keypoints []byte) *http.Request {
+	t.Helper()
+	var buf bytes.Buffer
+	writer := multipart.NewWriter(&buf)
+
+	part, err := writer.CreateFormFile("video", filename)
+	if err != nil {
+		t.Fatalf("create form file: %v", err)
+	}
+	if _, err := part.Write(content); err != nil {
+		t.Fatalf("write content: %v", err)
+	}
+	if err := writer.WriteField("lift_type", liftType); err != nil {
+		t.Fatalf("write field: %v", err)
+	}
+	if keypoints != nil {
+		kpPart, err := writer.CreateFormFile("keypoints", "keypoints.json")
+		if err != nil {
+			t.Fatalf("create keypoints field: %v", err)
+		}
+		if _, err := kpPart.Write(keypoints); err != nil {
+			t.Fatalf("write keypoints: %v", err)
+		}
+	}
+	writer.Close()
+
+	req := httptest.NewRequest("POST", "/lifts", &buf)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	return req
+}
+
+var sampleKeypointsJSON = []byte(`{
+	"sourceWidth": 1920,
+	"sourceHeight": 1080,
+	"frames": [
+		{
+			"timeOffsetMs": 0,
+			"boundingBox": {"left": 0.1, "top": 0.15, "right": 0.75, "bottom": 0.95},
+			"keypoints": [
+				{"name": "nose", "x": 0.5, "y": 0.3, "confidence": 0.95}
+			]
+		}
+	]
+}`)
+
+func TestHandleCreateLift_WithKeypoints(t *testing.T) {
+	srv := setupTestServer(t)
+	mux := http.NewServeMux()
+	srv.RegisterRoutes(mux)
+
+	req := createMultipartRequestWithKeypoints(t, "test.mp4", "snatch", []byte("fake video"), sampleKeypointsJSON)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusSeeOther {
+		t.Fatalf("expected 303, got %d: %s", w.Code, w.Body.String())
+	}
+
+	lifts, err := srv.Queries.ListLifts(context.Background())
+	if err != nil || len(lifts) != 1 {
+		t.Fatalf("expected 1 lift, got %d, err=%v", len(lifts), err)
+	}
+
+	// Verify video saved
+	videoPath := storage.LiftFile(srv.DataDir, lifts[0].ID, storage.FileOriginal)
+	if _, err := os.Stat(videoPath); os.IsNotExist(err) {
+		t.Error("video file should be persisted")
+	}
+
+	// Verify keypoints.json saved
+	kpPath := storage.LiftFile(srv.DataDir, lifts[0].ID, storage.FileKeypoints)
+	data, err := os.ReadFile(kpPath)
+	if err != nil {
+		t.Fatalf("keypoints.json not written: %v", err)
+	}
+	if len(data) == 0 {
+		t.Error("keypoints.json should not be empty")
+	}
+}
+
+func TestHandleCreateLift_WithoutKeypoints(t *testing.T) {
+	srv := setupTestServer(t)
+	mux := http.NewServeMux()
+	srv.RegisterRoutes(mux)
+
+	req := createMultipartRequest(t, "test.mp4", "snatch", []byte("fake video"))
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusSeeOther {
+		t.Fatalf("expected 303, got %d: %s", w.Code, w.Body.String())
+	}
+
+	lifts, _ := srv.Queries.ListLifts(context.Background())
+	if len(lifts) != 1 {
+		t.Fatalf("expected 1 lift, got %d", len(lifts))
+	}
+
+	// keypoints.json should NOT exist
+	kpPath := storage.LiftFile(srv.DataDir, lifts[0].ID, storage.FileKeypoints)
+	if _, err := os.Stat(kpPath); !os.IsNotExist(err) {
+		t.Error("keypoints.json should not exist when not provided")
+	}
+}
+
+func TestHandleCreateLift_InvalidKeypoints(t *testing.T) {
+	srv := setupTestServer(t)
+	mux := http.NewServeMux()
+	srv.RegisterRoutes(mux)
+
+	req := createMultipartRequestWithKeypoints(t, "test.mp4", "snatch", []byte("fake video"), []byte("not json"))
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	// Upload should still succeed (graceful degradation)
+	if w.Code != http.StatusSeeOther {
+		t.Fatalf("expected 303, got %d: %s", w.Code, w.Body.String())
+	}
+
+	lifts, _ := srv.Queries.ListLifts(context.Background())
+	if len(lifts) != 1 {
+		t.Fatalf("expected 1 lift, got %d", len(lifts))
+	}
+
+	// keypoints.json should NOT be saved (invalid JSON was discarded)
+	kpPath := storage.LiftFile(srv.DataDir, lifts[0].ID, storage.FileKeypoints)
+	if _, err := os.Stat(kpPath); !os.IsNotExist(err) {
+		t.Error("invalid keypoints should not be persisted")
+	}
+}
+
+func TestHandleCreateLift_EmptyKeypoints(t *testing.T) {
+	srv := setupTestServer(t)
+	mux := http.NewServeMux()
+	srv.RegisterRoutes(mux)
+
+	// Valid JSON but missing required fields
+	emptyKp := []byte(`{"sourceWidth": 0, "sourceHeight": 0, "frames": []}`)
+	req := createMultipartRequestWithKeypoints(t, "test.mp4", "clean", []byte("fake video"), emptyKp)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusSeeOther {
+		t.Fatalf("expected 303, got %d: %s", w.Code, w.Body.String())
+	}
+
+	lifts, _ := srv.Queries.ListLifts(context.Background())
+	kpPath := storage.LiftFile(srv.DataDir, lifts[0].ID, storage.FileKeypoints)
+	if _, err := os.Stat(kpPath); !os.IsNotExist(err) {
+		t.Error("keypoints with missing required fields should not be persisted")
+	}
+}
+
 func TestIsValidVideo(t *testing.T) {
 	tests := []struct {
 		filename    string

@@ -195,7 +195,7 @@ func TestPipelineVideoPathPropagation(t *testing.T) {
 
 func TestRenderStagesHTML(t *testing.T) {
 	stages := DefaultStages()
-	states := []StageState{StateComplete, StateActive, StatePending, StatePending, StatePending, StatePending}
+	states := []StageState{StateComplete, StateActive, StatePending, StatePending, StatePending}
 
 	html := RenderStagesHTML(stages, states)
 
@@ -215,9 +215,10 @@ func TestRenderStagesHTML(t *testing.T) {
 
 func TestRenderStatusHTML(t *testing.T) {
 	stages := DefaultStages()
+	numStages := len(stages) // 5
 
 	// All pending.
-	states := make([]StageState, 6)
+	states := make([]StageState, numStages)
 	for i := range states {
 		states[i] = StatePending
 	}
@@ -232,8 +233,8 @@ func TestRenderStatusHTML(t *testing.T) {
 	if !strings.Contains(html, "Trimming") {
 		t.Errorf("expected 'Trimming' for first active, got: %s", html)
 	}
-	if !strings.Contains(html, "1 of 6") {
-		t.Errorf("expected '1 of 6', got: %s", html)
+	if !strings.Contains(html, "1 of 5") {
+		t.Errorf("expected '1 of 5', got: %s", html)
 	}
 
 	// All complete.

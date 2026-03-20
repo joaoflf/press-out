@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -13,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"press-out/internal/pose"
 	"press-out/internal/storage"
 	"press-out/internal/storage/sqlc"
 )
@@ -131,6 +133,9 @@ func (s *Server) HandleCreateLift(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Save optional keypoints.json from client-side pose estimation.
+	saveKeypoints(r, s.DataDir, lift.ID)
+
 	slog.Info("lift uploaded", "id", lift.ID, "type", liftType)
 
 	if s.Pipeline != nil {
@@ -147,6 +152,38 @@ func isValidVideo(filename, contentType string) bool {
 	}
 	mt, _, _ := mime.ParseMediaType(contentType)
 	return mt == "video/mp4" || mt == "video/quicktime"
+}
+
+// saveKeypoints reads the optional "keypoints" multipart field, validates it
+// as a pose.Result JSON, and writes it to the lift directory. Any failure is
+// logged but does not abort the upload (graceful degradation).
+func saveKeypoints(r *http.Request, dataDir string, liftID int64) {
+	kpFile, _, err := r.FormFile("keypoints")
+	if err != nil {
+		return // field absent — normal when client-side estimation was skipped
+	}
+	defer kpFile.Close()
+
+	data, err := io.ReadAll(kpFile)
+	if err != nil {
+		slog.Warn("failed to read keypoints field", "lift_id", liftID, "error", err)
+		return
+	}
+
+	var result pose.Result
+	if err := json.Unmarshal(data, &result); err != nil {
+		slog.Warn("invalid keypoints JSON", "lift_id", liftID, "error", err)
+		return
+	}
+	if result.SourceWidth == 0 || result.SourceHeight == 0 || len(result.Frames) == 0 {
+		slog.Warn("keypoints JSON missing required fields", "lift_id", liftID)
+		return
+	}
+
+	kpPath := storage.LiftFile(dataDir, liftID, storage.FileKeypoints)
+	if err := os.WriteFile(kpPath, data, 0644); err != nil {
+		slog.Error("failed to write keypoints.json", "lift_id", liftID, "error", err)
+	}
 }
 
 // formatLiftType returns a human-readable lift type label.

@@ -2,11 +2,11 @@ package pipeline
 
 import "context"
 
-// Stage name constants for the 6-stage pipeline.
+// Stage name constants for the 5-stage pipeline.
+// Pose estimation is handled client-side via ml5.js before upload.
 const (
 	StageTrimming           = "Trimming"
 	StageCropping           = "Cropping"
-	StagePoseEstimation     = "Pose estimation"
 	StageRenderingSkeleton  = "Rendering skeleton"
 	StageComputingMetrics   = "Computing metrics"
 	StageGeneratingCoaching = "Generating coaching"
@@ -55,7 +55,6 @@ func (s *StubStage) Run(_ context.Context, input StageInput) (StageOutput, error
 func DefaultStages() []Stage {
 	return []Stage{
 		&StubStage{StageName: StageTrimming},
-		&StubStage{StageName: StagePoseEstimation},
 		&StubStage{StageName: StageCropping},
 		&StubStage{StageName: StageRenderingSkeleton},
 		&StubStage{StageName: StageComputingMetrics},

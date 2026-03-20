@@ -15,6 +15,14 @@
                        class="file-input file-input-bordered w-full" />
             </div>
 
+            <div id="pose-progress" class="mb-4 hidden">
+                <div class="flex justify-between text-sm mb-1">
+                    <span id="pose-status">Detecting poses...</span>
+                    <span id="pose-frame-counter"></span>
+                </div>
+                <progress id="pose-progress-bar" class="progress progress-primary w-full" value="0" max="100"></progress>
+            </div>
+
             <div class="form-control mb-4">
                 <label class="label">
                     <span class="label-text">Lift Type</span>

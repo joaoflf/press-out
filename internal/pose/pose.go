@@ -1,13 +1,5 @@
 package pose
 
-import "context"
-
-// Client is the provider-agnostic interface for pose estimation.
-type Client interface {
-	DetectPose(ctx context.Context, videoData []byte) (*Result, error)
-	Close() error
-}
-
 // Result holds pose estimation output for a video.
 type Result struct {
 	SourceWidth  int     `json:"sourceWidth"`
