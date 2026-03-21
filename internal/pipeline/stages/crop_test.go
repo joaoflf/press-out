@@ -624,6 +624,45 @@ func TestComputeCropRegion_NoseCenter(t *testing.T) {
 	}
 }
 
+func TestComputeCropRegion_NoseXOnly(t *testing.T) {
+	// Nose keypoint should only drive horizontal centering.
+	// Vertical centering should always use bounding box center Y.
+	// Here, nose Y=0.15 (near top) but BB center Y=0.5 (mid-frame).
+	// If nose Y were used, crop would shift up and cut off legs.
+	frames := []pose.Frame{
+		{
+			BoundingBox: pose.BoundingBox{Left: 0.4, Top: 0.2, Right: 0.6, Bottom: 0.8},
+			Keypoints:   []pose.Keypoint{{Name: pose.LandmarkNose, X: 0.5, Y: 0.15, Confidence: 0.9}},
+		},
+		{
+			BoundingBox: pose.BoundingBox{Left: 0.4, Top: 0.2, Right: 0.6, Bottom: 0.8},
+			Keypoints:   []pose.Keypoint{{Name: pose.LandmarkNose, X: 0.5, Y: 0.15, Confidence: 0.9}},
+		},
+		{
+			BoundingBox: pose.BoundingBox{Left: 0.4, Top: 0.2, Right: 0.6, Bottom: 0.8},
+			Keypoints:   []pose.Keypoint{{Name: pose.LandmarkNose, X: 0.5, Y: 0.15, Confidence: 0.9}},
+		},
+	}
+
+	sourceW, sourceH := 1080, 1920
+	_, y, _, h := computeCropRegion(frames, sourceW, sourceH)
+
+	cropCenterY := float64(y) + float64(h)/2
+	bbCenterY := 0.5 * float64(sourceH)   // 960 (BB vertical center)
+	noseCenterY := 0.15 * float64(sourceH) // 288 (nose Y — too high)
+
+	// Crop center Y should be near BB center, not nose Y.
+	distToBB := math.Abs(cropCenterY - bbCenterY)
+	distToNose := math.Abs(cropCenterY - noseCenterY)
+	if distToBB >= distToNose {
+		t.Errorf("crop center Y=%.1f is closer to nose Y (%.1f) than BB center Y (%.1f); "+
+			"vertical centering should use BB center, not nose",
+			cropCenterY, noseCenterY, bbCenterY)
+	}
+
+	t.Logf("crop center Y=%.1f (BB center=%.1f, nose=%.1f)", cropCenterY, bbCenterY, noseCenterY)
+}
+
 func TestComputeCropRegion_NoseFallback(t *testing.T) {
 	// When nose confidence is low, should fall back to BB center.
 	frames := []pose.Frame{

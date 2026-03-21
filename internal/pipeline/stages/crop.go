@@ -197,9 +197,10 @@ func noseCenter(f pose.Frame) (float64, float64, bool) {
 
 // computeCropRegion computes the crop rectangle from per-frame bounding boxes.
 // It finds the enclosing box, adds padding, enforces 9:16 aspect ratio, and clamps to frame bounds.
-// The crop dimensions are derived from the union bounding box (to ensure no frame clips the lifter),
-// but the crop position is centered on the median nose keypoint (head) for stable centering,
-// falling back to bounding box center when nose confidence is low.
+// The crop dimensions are derived from the union bounding box (to ensure no frame clips the lifter).
+// Horizontal centering uses the median nose keypoint X (head) for stable centering,
+// falling back to bounding box center X when nose confidence is low.
+// Vertical centering always uses the median bounding box center Y to keep the full body in frame.
 func computeCropRegion(frames []pose.Frame, sourceW, sourceH int) (x, y, w, h int) {
 	// Find the enclosing bounding box across all frames (normalized 0-1 coords).
 	minLeft := math.MaxFloat64
@@ -226,12 +227,13 @@ func computeCropRegion(frames []pose.Frame, sourceW, sourceH int) (x, y, w, h in
 		if bb.Bottom > maxBottom {
 			maxBottom = bb.Bottom
 		}
-		if nx, ny, ok := noseCenter(f); ok {
+		// Vertical centering always uses bounding box center (preserves full body).
+		centersY = append(centersY, (bb.Top+bb.Bottom)/2)
+		// Horizontal centering prefers nose keypoint (stable head tracking).
+		if nx, _, ok := noseCenter(f); ok {
 			centersX = append(centersX, nx)
-			centersY = append(centersY, ny)
 		} else {
 			centersX = append(centersX, (bb.Left+bb.Right)/2)
-			centersY = append(centersY, (bb.Top+bb.Bottom)/2)
 		}
 	}
 
