@@ -3,9 +3,10 @@ package pipeline
 import "context"
 
 // Stage name constants for the 6-stage pipeline.
+// Order: Pose estimation -> Trimming -> Cropping -> Rendering skeleton -> Computing metrics -> Generating coaching
 const (
-	StageTrimming           = "Trimming"
 	StagePoseEstimation     = "Pose estimation"
+	StageTrimming           = "Trimming"
 	StageCropping           = "Cropping"
 	StageRenderingSkeleton  = "Rendering skeleton"
 	StageComputingMetrics   = "Computing metrics"
@@ -54,8 +55,8 @@ func (s *StubStage) Run(_ context.Context, input StageInput) (StageOutput, error
 // DefaultStages returns the ordered set of pipeline stages with stub implementations.
 func DefaultStages() []Stage {
 	return []Stage{
-		&StubStage{StageName: StageTrimming},
 		&StubStage{StageName: StagePoseEstimation},
+		&StubStage{StageName: StageTrimming},
 		&StubStage{StageName: StageCropping},
 		&StubStage{StageName: StageRenderingSkeleton},
 		&StubStage{StageName: StageComputingMetrics},

@@ -92,9 +92,9 @@ func main() {
 
 	broker := sse.NewBroker()
 	pipelineStages := pipeline.DefaultStages()
-	pipelineStages[0] = &stages.TrimStage{}                          // Replace stub with real trim stage
-	pipelineStages[1] = &stages.PoseStage{ProjectRoot: projectRoot}  // Replace stub with real pose stage
-	pipelineStages[2] = &stages.CropStage{}                          // Replace stub with real crop stage
+	pipelineStages[0] = &stages.PoseStage{ProjectRoot: projectRoot} // Replace stub with real pose stage
+	pipelineStages[1] = &stages.TrimStage{}                         // Replace stub with real trim stage
+	pipelineStages[2] = &stages.CropStage{}                         // Replace stub with real crop stage
 
 	pl := pipeline.New(pipelineStages, broker)
 

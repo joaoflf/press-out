@@ -205,6 +205,9 @@ func TestRenderStagesHTML(t *testing.T) {
 	if !strings.Contains(html, "loading-spinner") {
 		t.Error("expected active stage spinner")
 	}
+	if !strings.Contains(html, "Pose estimation") {
+		t.Error("expected stage name 'Pose estimation'")
+	}
 	if !strings.Contains(html, "Trimming") {
 		t.Error("expected stage name 'Trimming'")
 	}
@@ -230,8 +233,8 @@ func TestRenderStatusHTML(t *testing.T) {
 	// First active.
 	states[0] = StateActive
 	html = RenderStatusHTML(stages, states)
-	if !strings.Contains(html, "Trimming") {
-		t.Errorf("expected 'Trimming' for first active, got: %s", html)
+	if !strings.Contains(html, "Pose estimation") {
+		t.Errorf("expected 'Pose estimation' for first active, got: %s", html)
 	}
 	if !strings.Contains(html, "1 of 6") {
 		t.Errorf("expected '1 of 6', got: %s", html)
@@ -270,5 +273,27 @@ func TestPipelineProcessingFlag(t *testing.T) {
 
 	if broker.IsProcessing(1) {
 		t.Error("should not be processing after Run completes")
+	}
+}
+
+func TestDefaultStagesOrder(t *testing.T) {
+	stages := DefaultStages()
+	expected := []string{
+		StagePoseEstimation,
+		StageTrimming,
+		StageCropping,
+		StageRenderingSkeleton,
+		StageComputingMetrics,
+		StageGeneratingCoaching,
+	}
+
+	if len(stages) != len(expected) {
+		t.Fatalf("expected %d stages, got %d", len(expected), len(stages))
+	}
+
+	for i, want := range expected {
+		if got := stages[i].Name(); got != want {
+			t.Errorf("stage[%d] = %q, want %q", i, got, want)
+		}
 	}
 }
