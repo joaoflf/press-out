@@ -533,3 +533,118 @@ func TestComputeCropRegion_FullFrame(t *testing.T) {
 		t.Errorf("crop exceeds frame height: y=%d + h=%d > 1920", y, h)
 	}
 }
+
+func TestNoseCenter(t *testing.T) {
+	tests := []struct {
+		name    string
+		frame   pose.Frame
+		wantX   float64
+		wantY   float64
+		wantOK  bool
+	}{
+		{
+			name: "nose with high confidence",
+			frame: pose.Frame{
+				Keypoints: []pose.Keypoint{
+					{Name: pose.LandmarkNose, X: 0.5, Y: 0.3, Confidence: 0.9},
+				},
+			},
+			wantX: 0.5, wantY: 0.3, wantOK: true,
+		},
+		{
+			name: "nose with low confidence",
+			frame: pose.Frame{
+				Keypoints: []pose.Keypoint{
+					{Name: pose.LandmarkNose, X: 0.5, Y: 0.3, Confidence: 0.1},
+				},
+			},
+			wantOK: false,
+		},
+		{
+			name: "no nose keypoint",
+			frame: pose.Frame{
+				Keypoints: []pose.Keypoint{
+					{Name: pose.LandmarkLeftShoulder, X: 0.4, Y: 0.5, Confidence: 0.9},
+				},
+			},
+			wantOK: false,
+		},
+		{
+			name:   "no keypoints at all",
+			frame:  pose.Frame{},
+			wantOK: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotX, gotY, gotOK := noseCenter(tt.frame)
+			if gotOK != tt.wantOK {
+				t.Errorf("noseCenter() ok = %v, want %v", gotOK, tt.wantOK)
+			}
+			if gotOK && (gotX != tt.wantX || gotY != tt.wantY) {
+				t.Errorf("noseCenter() = (%v, %v), want (%v, %v)", gotX, gotY, tt.wantX, tt.wantY)
+			}
+		})
+	}
+}
+
+func TestComputeCropRegion_NoseCenter(t *testing.T) {
+	// Frames with nose keypoints at x=0.5 and BB centers at x=0.5.
+	// One outlier frame has BB center at x=0.875 but nose at x=0.5.
+	// With nose centering, the crop should stay centered at x=0.5.
+	frames := []pose.Frame{
+		{
+			BoundingBox: pose.BoundingBox{Left: 0.4, Top: 0.2, Right: 0.6, Bottom: 0.8},
+			Keypoints:   []pose.Keypoint{{Name: pose.LandmarkNose, X: 0.5, Y: 0.3, Confidence: 0.9}},
+		},
+		{
+			BoundingBox: pose.BoundingBox{Left: 0.4, Top: 0.2, Right: 0.6, Bottom: 0.8},
+			Keypoints:   []pose.Keypoint{{Name: pose.LandmarkNose, X: 0.5, Y: 0.3, Confidence: 0.9}},
+		},
+		{
+			BoundingBox: pose.BoundingBox{Left: 0.4, Top: 0.2, Right: 0.6, Bottom: 0.8},
+			Keypoints:   []pose.Keypoint{{Name: pose.LandmarkNose, X: 0.5, Y: 0.3, Confidence: 0.9}},
+		},
+		{
+			// Outlier BB, but nose is still at center.
+			BoundingBox: pose.BoundingBox{Left: 0.8, Top: 0.2, Right: 0.95, Bottom: 0.8},
+			Keypoints:   []pose.Keypoint{{Name: pose.LandmarkNose, X: 0.5, Y: 0.3, Confidence: 0.9}},
+		},
+	}
+
+	sourceW, sourceH := 1080, 1920
+	x, _, w, _ := computeCropRegion(frames, sourceW, sourceH)
+
+	cropCenterX := float64(x) + float64(w)/2
+	noseExpected := 0.5 * float64(sourceW) // 540
+
+	// Crop center should be very close to the nose position.
+	if math.Abs(cropCenterX-noseExpected) > 20 {
+		t.Errorf("crop center X=%.1f, want ~%.1f (nose-based centering)", cropCenterX, noseExpected)
+	}
+}
+
+func TestComputeCropRegion_NoseFallback(t *testing.T) {
+	// When nose confidence is low, should fall back to BB center.
+	frames := []pose.Frame{
+		{
+			BoundingBox: pose.BoundingBox{Left: 0.3, Top: 0.2, Right: 0.7, Bottom: 0.8},
+			Keypoints:   []pose.Keypoint{{Name: pose.LandmarkNose, X: 0.9, Y: 0.9, Confidence: 0.1}},
+		},
+		{
+			BoundingBox: pose.BoundingBox{Left: 0.3, Top: 0.2, Right: 0.7, Bottom: 0.8},
+			Keypoints:   []pose.Keypoint{{Name: pose.LandmarkNose, X: 0.9, Y: 0.9, Confidence: 0.1}},
+		},
+	}
+
+	sourceW, sourceH := 1080, 1920
+	x, _, w, _ := computeCropRegion(frames, sourceW, sourceH)
+
+	cropCenterX := float64(x) + float64(w)/2
+	bbCenterExpected := 0.5 * float64(sourceW) // 540 (BB center = (0.3+0.7)/2 = 0.5)
+
+	// Should use BB center since nose confidence is too low.
+	if math.Abs(cropCenterX-bbCenterExpected) > 5 {
+		t.Errorf("crop center X=%.1f, want ~%.1f (BB center fallback)", cropCenterX, bbCenterExpected)
+	}
+}

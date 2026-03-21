@@ -26,6 +26,12 @@ const (
 	smoothingWindow       = 5    // number of frames for displacement smoothing
 )
 
+// TrimParams holds the trim boundaries so downstream stages can filter by trimmed range.
+type TrimParams struct {
+	TrimStartMs int64 `json:"trimStartMs"`
+	TrimEndMs   int64 `json:"trimEndMs"`
+}
+
 // TrimStage analyzes keypoint displacement to detect the lift portion and trims the video.
 type TrimStage struct{}
 
@@ -82,6 +88,22 @@ func (s *TrimStage) Run(ctx context.Context, input pipeline.StageInput) (pipelin
 	if err := ffmpeg.TrimVideo(ctx, input.VideoPath, outputPath, trimStart, trimDuration); err != nil {
 		logger.Error("ffmpeg trim failed", "error", err, "duration_ms", time.Since(start).Milliseconds())
 		return pipeline.StageOutput{}, fmt.Errorf("trim: ffmpeg: %w", err)
+	}
+
+	// Write trim-params.json so downstream stages can filter by trimmed range.
+	trimParams := TrimParams{
+		TrimStartMs: int64(trimStart * 1000),
+		TrimEndMs:   int64(trimEnd * 1000),
+	}
+	trimParamsData, err := json.Marshal(trimParams)
+	if err != nil {
+		logger.Error("failed to marshal trim params", "error", err)
+		return pipeline.StageOutput{}, fmt.Errorf("trim: marshal params: %w", err)
+	}
+	trimParamsPath := storage.LiftFile(input.DataDir, input.LiftID, storage.FileTrimParams)
+	if err := os.WriteFile(trimParamsPath, trimParamsData, 0644); err != nil {
+		logger.Error("failed to write trim params", "error", err)
+		return pipeline.StageOutput{}, fmt.Errorf("trim: write params: %w", err)
 	}
 
 	logger.Info("trim complete",

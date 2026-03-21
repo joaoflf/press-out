@@ -15,6 +15,7 @@ const (
 	FileThumbnail  = "thumbnail.jpg"
 	FileKeypoints  = "keypoints.json"
 	FileCropParams = "crop-params.json"
+	FileTrimParams = "trim-params.json"
 )
 
 // LiftDir returns the directory path for a given lift's files.

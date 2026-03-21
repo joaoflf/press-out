@@ -17,9 +17,10 @@ import (
 )
 
 const (
-	cropAspectW        = 9
-	cropAspectH        = 16
-	cropPaddingPercent = 0.02
+	cropAspectW              = 9
+	cropAspectH              = 16
+	cropPaddingPercent       = 0.02
+	noseCenterMinConfidence  = 0.3
 )
 
 // CropParams holds the crop region and source dimensions for downstream coordinate transformation.
@@ -83,8 +84,34 @@ func (s *CropStage) Run(ctx context.Context, input pipeline.StageInput) (pipelin
 		}
 	}
 
-	// Compute enclosing bounding box across all frames.
-	cropX, cropY, cropW, cropH := computeCropRegion(result.Frames, sourceW, sourceH)
+	// Filter frames to trimmed range if trim-params.json exists.
+	frames := result.Frames
+	trimParamsPath := storage.LiftFile(input.DataDir, input.LiftID, storage.FileTrimParams)
+	if trimData, err := os.ReadFile(trimParamsPath); err == nil {
+		var tp TrimParams
+		if err := json.Unmarshal(trimData, &tp); err == nil {
+			filtered := make([]pose.Frame, 0, len(frames))
+			for _, f := range frames {
+				if f.TimeOffsetMs >= tp.TrimStartMs && f.TimeOffsetMs <= tp.TrimEndMs {
+					filtered = append(filtered, f)
+				}
+			}
+			if len(filtered) > 0 {
+				logger.Info("filtered keypoints to trim range",
+					"total_frames", len(frames),
+					"trimmed_frames", len(filtered),
+					"trim_start_ms", tp.TrimStartMs,
+					"trim_end_ms", tp.TrimEndMs,
+				)
+				frames = filtered
+			} else {
+				logger.Warn("no keypoints within trim range, using all frames")
+			}
+		}
+	}
+
+	// Compute enclosing bounding box across trimmed frames.
+	cropX, cropY, cropW, cropH := computeCropRegion(frames, sourceW, sourceH)
 
 	// Write crop-params.json.
 	params := CropParams{
@@ -157,10 +184,22 @@ func median(values []float64) float64 {
 	return (sorted[n/2-1] + sorted[n/2]) / 2
 }
 
+// noseCenter extracts the nose keypoint coordinates from a frame if confidence is sufficient.
+// Returns the normalized (x, y) and true if found, or (0, 0) and false otherwise.
+func noseCenter(f pose.Frame) (float64, float64, bool) {
+	for _, kp := range f.Keypoints {
+		if kp.Name == pose.LandmarkNose && kp.Confidence >= noseCenterMinConfidence {
+			return kp.X, kp.Y, true
+		}
+	}
+	return 0, 0, false
+}
+
 // computeCropRegion computes the crop rectangle from per-frame bounding boxes.
 // It finds the enclosing box, adds padding, enforces 9:16 aspect ratio, and clamps to frame bounds.
 // The crop dimensions are derived from the union bounding box (to ensure no frame clips the lifter),
-// but the crop position is centered on the median per-frame bounding box center (robust to outliers).
+// but the crop position is centered on the median nose keypoint (head) for stable centering,
+// falling back to bounding box center when nose confidence is low.
 func computeCropRegion(frames []pose.Frame, sourceW, sourceH int) (x, y, w, h int) {
 	// Find the enclosing bounding box across all frames (normalized 0-1 coords).
 	minLeft := math.MaxFloat64
@@ -168,7 +207,8 @@ func computeCropRegion(frames []pose.Frame, sourceW, sourceH int) (x, y, w, h in
 	maxRight := -math.MaxFloat64
 	maxBottom := -math.MaxFloat64
 
-	// Collect per-frame bounding box centers for median computation.
+	// Collect per-frame center points for median computation.
+	// Prefer nose keypoint; fall back to BB center.
 	centersX := make([]float64, 0, len(frames))
 	centersY := make([]float64, 0, len(frames))
 
@@ -186,8 +226,13 @@ func computeCropRegion(frames []pose.Frame, sourceW, sourceH int) (x, y, w, h in
 		if bb.Bottom > maxBottom {
 			maxBottom = bb.Bottom
 		}
-		centersX = append(centersX, (bb.Left+bb.Right)/2)
-		centersY = append(centersY, (bb.Top+bb.Bottom)/2)
+		if nx, ny, ok := noseCenter(f); ok {
+			centersX = append(centersX, nx)
+			centersY = append(centersY, ny)
+		} else {
+			centersX = append(centersX, (bb.Left+bb.Right)/2)
+			centersY = append(centersY, (bb.Top+bb.Bottom)/2)
+		}
 	}
 
 	// Convert normalized coordinates to pixel coordinates.
@@ -218,7 +263,7 @@ func computeCropRegion(frames []pose.Frame, sourceW, sourceH int) (x, y, w, h in
 	targetRatio := float64(cropAspectW) / float64(cropAspectH)
 	currentRatio := boxW / boxH
 
-	// Center on median per-frame bounding box center (robust to outlier frames).
+	// Center on median per-frame center point (nose keypoint preferred, robust to outlier frames).
 	centerX := median(centersX) * sw
 	centerY := median(centersY) * sh
 
