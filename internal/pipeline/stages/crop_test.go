@@ -434,33 +434,31 @@ func TestMedian(t *testing.T) {
 }
 
 func TestComputeCropRegion_MedianCenter(t *testing.T) {
-	// Construct frames where one outlier frame shifts the union center significantly.
-	// 4 frames with the lifter centered at x=0.5, 1 outlier frame at x=0.9.
-	// Union center would be at (0.4+0.95)/2 = 0.675, but median center should be ~0.5.
-	frames := []pose.Frame{
-		{BoundingBox: pose.BoundingBox{Left: 0.4, Top: 0.2, Right: 0.6, Bottom: 0.8}},
-		{BoundingBox: pose.BoundingBox{Left: 0.4, Top: 0.2, Right: 0.6, Bottom: 0.8}},
-		{BoundingBox: pose.BoundingBox{Left: 0.4, Top: 0.2, Right: 0.6, Bottom: 0.8}},
-		{BoundingBox: pose.BoundingBox{Left: 0.4, Top: 0.2, Right: 0.6, Bottom: 0.8}},
-		// Outlier frame: lifter far right
-		{BoundingBox: pose.BoundingBox{Left: 0.8, Top: 0.2, Right: 0.95, Bottom: 0.8}},
+	// Horizontal centering uses lockout frames (last ~20%).
+	// 10 frames: first 8 have lifter at x=0.3 (bent-over position),
+	// last 2 (lockout) have lifter at x=0.5 (standing position).
+	// Crop should center near x=0.5 (lockout), not x=0.3 (bent-over).
+	frames := make([]pose.Frame, 10)
+	for i := 0; i < 8; i++ {
+		frames[i] = pose.Frame{BoundingBox: pose.BoundingBox{Left: 0.2, Top: 0.2, Right: 0.4, Bottom: 0.8}}
+	}
+	for i := 8; i < 10; i++ {
+		frames[i] = pose.Frame{BoundingBox: pose.BoundingBox{Left: 0.4, Top: 0.2, Right: 0.6, Bottom: 0.8}}
 	}
 
 	sourceW, sourceH := 1080, 1920
 	x, y, w, h := computeCropRegion(frames, sourceW, sourceH)
 
-	// The median horizontal center is 0.5 (from the 4 consistent frames).
-	// The crop should be centered near x=540 (0.5 * 1080), not at ~729 (union center).
 	cropCenterX := float64(x) + float64(w)/2
-	medianExpected := 0.5 * float64(sourceW) // 540
-	unionExpected := (0.4 + 0.95) / 2 * float64(sourceW)
+	lockoutExpected := 0.5 * float64(sourceW)  // 540 — lockout center
+	bentOverExpected := 0.3 * float64(sourceW) // 324 — bent-over center
 
-	// Crop center should be closer to median than to union center.
-	distToMedian := math.Abs(cropCenterX - medianExpected)
-	distToUnion := math.Abs(cropCenterX - unionExpected)
-	if distToMedian >= distToUnion {
-		t.Errorf("crop center X=%.1f is closer to union center (%.1f) than median center (%.1f)",
-			cropCenterX, unionExpected, medianExpected)
+	// Crop center should be closer to lockout position than bent-over position.
+	distToLockout := math.Abs(cropCenterX - lockoutExpected)
+	distToBentOver := math.Abs(cropCenterX - bentOverExpected)
+	if distToLockout >= distToBentOver {
+		t.Errorf("crop center X=%.1f is closer to bent-over center (%.1f) than lockout center (%.1f)",
+			cropCenterX, bentOverExpected, lockoutExpected)
 	}
 
 	// Verify 9:16 aspect ratio.
@@ -475,8 +473,8 @@ func TestComputeCropRegion_MedianCenter(t *testing.T) {
 		t.Errorf("crop out of bounds: x=%d y=%d w=%d h=%d (source %dx%d)", x, y, w, h, sourceW, sourceH)
 	}
 
-	t.Logf("crop region: x=%d y=%d w=%d h=%d (center=%.1f, median=%.1f, union=%.1f)",
-		x, y, w, h, cropCenterX, medianExpected, unionExpected)
+	t.Logf("crop region: x=%d y=%d w=%d h=%d (center=%.1f, lockout=%.1f, bentOver=%.1f)",
+		x, y, w, h, cropCenterX, lockoutExpected, bentOverExpected)
 }
 
 func TestComputeCropRegion_SymmetricFrames(t *testing.T) {

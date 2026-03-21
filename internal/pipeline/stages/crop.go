@@ -19,8 +19,10 @@ import (
 const (
 	cropAspectW              = 9
 	cropAspectH              = 16
-	cropPaddingPercent       = 0.02
+	cropPaddingPercent       = 0.10
 	noseCenterMinConfidence  = 0.3
+	// Fraction of frames from the end used for horizontal centering (standing/lockout position).
+	lockoutFraction         = 0.20
 )
 
 // CropParams holds the crop region and source dimensions for downstream coordinate transformation.
@@ -198,8 +200,8 @@ func noseCenter(f pose.Frame) (float64, float64, bool) {
 // computeCropRegion computes the crop rectangle from per-frame bounding boxes.
 // It finds the enclosing box, adds padding, enforces 9:16 aspect ratio, and clamps to frame bounds.
 // The crop dimensions are derived from the union bounding box (to ensure no frame clips the lifter).
-// Horizontal centering uses the median nose keypoint X (head) for stable centering,
-// falling back to bounding box center X when nose confidence is low.
+// Horizontal centering uses the median nose keypoint X from the last ~20% of frames
+// (standing/lockout position) for stable centering on the finished lift position.
 // Vertical centering always uses the median bounding box center Y to keep the full body in frame.
 func computeCropRegion(frames []pose.Frame, sourceW, sourceH int) (x, y, w, h int) {
 	// Find the enclosing bounding box across all frames (normalized 0-1 coords).
@@ -208,12 +210,19 @@ func computeCropRegion(frames []pose.Frame, sourceW, sourceH int) (x, y, w, h in
 	maxRight := -math.MaxFloat64
 	maxBottom := -math.MaxFloat64
 
-	// Collect per-frame center points for median computation.
-	// Prefer nose keypoint; fall back to BB center.
-	centersX := make([]float64, 0, len(frames))
+	// Collect per-frame vertical centers for median computation.
 	centersY := make([]float64, 0, len(frames))
 
-	for _, f := range frames {
+	// Determine the start index for lockout frames (last ~20%).
+	lockoutStart := len(frames) - int(math.Ceil(float64(len(frames))*lockoutFraction))
+	if lockoutStart < 0 {
+		lockoutStart = 0
+	}
+
+	// Collect horizontal centers only from lockout frames.
+	centersX := make([]float64, 0, len(frames)-lockoutStart)
+
+	for i, f := range frames {
 		bb := f.BoundingBox
 		if bb.Left < minLeft {
 			minLeft = bb.Left
@@ -229,11 +238,13 @@ func computeCropRegion(frames []pose.Frame, sourceW, sourceH int) (x, y, w, h in
 		}
 		// Vertical centering always uses bounding box center (preserves full body).
 		centersY = append(centersY, (bb.Top+bb.Bottom)/2)
-		// Horizontal centering prefers nose keypoint (stable head tracking).
-		if nx, _, ok := noseCenter(f); ok {
-			centersX = append(centersX, nx)
-		} else {
-			centersX = append(centersX, (bb.Left+bb.Right)/2)
+		// Horizontal centering: only use lockout frames (last ~20%).
+		if i >= lockoutStart {
+			if nx, _, ok := noseCenter(f); ok {
+				centersX = append(centersX, nx)
+			} else {
+				centersX = append(centersX, (bb.Left+bb.Right)/2)
+			}
 		}
 	}
 
