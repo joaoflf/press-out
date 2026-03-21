@@ -2,6 +2,11 @@
 
 ## Pose Estimation
 
-Pose estimation runs client-side in the browser via ml5.js (MoveNet SINGLEPOSE_THUNDER).
-The browser processes the video frame-by-frame, then uploads both the video file and
-`keypoints.json` to the server. No cloud API or credentials needed.
+Pose estimation runs server-side via YOLO26n-Pose (ultralytics) as a Python subprocess
+managed by uv. The pipeline calls `uv run scripts/pose.py <video> -o <keypoints.json>`.
+No cloud API or credentials needed. Model (7.5MB) auto-downloads on first run.
+
+## Python Dependencies
+
+Python dependencies are managed by uv. The project has `pyproject.toml` and `uv.lock`
+at the project root. The pose script runs via `uv run`.

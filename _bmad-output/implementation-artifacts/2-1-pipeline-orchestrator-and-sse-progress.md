@@ -12,9 +12,9 @@ so that I know the system is working and can estimate when results will be ready
 
 1. **Given** a lift has just been uploaded, **When** the upload completes, **Then** the pipeline orchestrator starts processing automatically in a background goroutine, **And** the orchestrator runs stages sequentially using the Stage interface (Name() + Run(ctx, StageInput) (StageOutput, error)), **And** SSE events are emitted via the in-memory broker as each stage starts and completes
 
-2. **Given** the lifter is on the lift list page with a processing lift, **When** a pipeline stage completes, **Then** the compact pipeline indicator on the list item updates via SSE (current stage name + "N of 5"), **And** the update reaches the browser within 1 second of the stage completing (NFR5)
+2. **Given** the lifter is on the lift list page with a processing lift, **When** a pipeline stage completes, **Then** the compact pipeline indicator on the list item updates via SSE (current stage name + "N of 6"), **And** the update reaches the browser within 1 second of the stage completing (NFR5)
 
-3. **Given** the lifter taps into a processing lift, **When** the lift detail page loads, **Then** a full vertical stage checklist is displayed with 5 stages (Trimming, Cropping, Rendering skeleton, Computing metrics, Generating coaching) with three states per stage (pending: dimmed, active: pulsing dot, complete: sage checkmark), **And** the checklist updates in real-time via SSE as stages complete
+3. **Given** the lifter taps into a processing lift, **When** the lift detail page loads, **Then** a full vertical stage checklist is displayed with 6 stages (Trimming, Pose estimation, Cropping, Rendering skeleton, Computing metrics, Generating coaching) with three states per stage (pending: dimmed, active: pulsing dot, complete: sage checkmark), **And** the checklist updates in real-time via SSE as stages complete
 
 4. **Given** a pipeline stage returns an error, **When** the orchestrator receives the error, **Then** the error is logged server-side with slog (lift_id, stage, error attributes), **And** the stage is marked as skipped, **And** the pipeline continues with the last successful input passed forward unchanged, **And** no error screen is shown to the lifter (NFR9)
 
@@ -24,7 +24,7 @@ so that I know the system is working and can estimate when results will be ready
   - [ ] `Stage` interface with `Name() string` and `Run(ctx context.Context, input StageInput) (StageOutput, error)`
   - [ ] `StageInput` struct: `LiftID int64`, `DataDir string`, `VideoPath string` (path to best available video from prior stages)
   - [ ] `StageOutput` struct: `VideoPath string` (path to video produced, empty if no video), `KeypointsPath string`, `Skipped bool`
-  - [ ] Stage names as constants: `StageTrimming`, `StageCropping`, `StageRenderingSkeleton`, `StageComputingMetrics`, `StageGeneratingCoaching`
+  - [ ] Stage names as constants: `StageTrimming`, `StagePoseEstimation`, `StageCropping`, `StageRenderingSkeleton`, `StageComputingMetrics`, `StageGeneratingCoaching`
 
 - [ ] Create SSE broker in `internal/sse/broker.go` (AC: 1, 2, 3)
   - [ ] `Broker` struct with map of lift ID to subscriber channels
@@ -57,7 +57,7 @@ so that I know the system is working and can estimate when results will be ready
   - [ ] Wire pipeline creation in `main.go` with empty stages initially (stages added in stories 2.2-2.4)
 
 - [ ] Create pipeline stages template `web/templates/partials/pipeline-stages.html` (AC: 2, 3)
-  - [ ] Full variant (detail view): vertical list of 5 stages, each with name and state indicator
+  - [ ] Full variant (detail view): vertical list of 6 stages, each with name and state indicator
   - [ ] Pending state: dimmed text (text-gray-400)
   - [ ] Active state: pulsing sage dot (`animate-pulse` with sage color)
   - [ ] Complete state: sage checkmark icon (UX-DR5)
@@ -84,7 +84,7 @@ so that I know the system is working and can estimate when results will be ready
   - [ ] Verify `output.css`, HTMX script, `app.js` load without errors
   - [ ] Verify `<html data-theme="press-out">` attribute is present
   - [ ] Verify no JavaScript console errors on page load
-  - [ ] Verify pipeline stage checklist renders with correct 5 stage names
+  - [ ] Verify pipeline stage checklist renders with correct 6 stage names
   - [ ] Verify stage states (pending/active/complete) render with correct CSS classes
   - [ ] Verify compact pipeline indicator renders on list item for processing lift
   - [ ] Tear down server and test data after

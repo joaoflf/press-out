@@ -246,7 +246,7 @@ The skeleton overlay is the visual core. The metrics and phase timeline deepen i
 - Taps submit — one screen, three interactions, done
 
 **2. Processing (Wait):**
-- Screen shows pipeline stage checklist (Trimming → Cropping → Rendering skeleton → Computing metrics → Generating coaching)
+- Screen shows pipeline stage checklist (Trimming → Pose estimation → Cropping → Rendering skeleton → Computing metrics → Generating coaching)
 - Completed stages get a checkmark, current stage is highlighted, future stages are dimmed
 - Lifter puts phone down, loads plates, chalks up
 - When complete, result view replaces progress view automatically (SSE swap)
@@ -573,7 +573,7 @@ flowchart TD
 
 **Purpose:** Communicates processing progress — used both inline on lift list items and full-page on lift detail during processing.
 **Anatomy:**
-- Vertical list of 5 stages: Trimming → Cropping → Rendering skeleton → Computing metrics → Generating coaching
+- Vertical list of 6 stages: Trimming → Pose estimation → Cropping → Rendering skeleton → Computing metrics → Generating coaching
 - Each stage: icon + label
 
 **States per stage:**

@@ -161,7 +161,7 @@ Press-out is a server-rendered multi-page application (MPA) built with Go, HTMX,
 1. Video upload + storage (filesystem + SQLite)
 2. Motion-based auto-trim with padding (full video fallback)
 3. Person-barbell interaction detection + crop (full frame fallback)
-4. Client-side pose estimation via ml5.js MoveNet (runs in browser before upload)
+4. Server-side pose estimation via YOLO26n-Pose (Python subprocess after upload)
 5. Skeleton overlay rendering (dual pre-rendered videos)
 6. Six metrics computation from keypoint data
 7. Video player UI (HTMX + Tailwind, mobile-first, toggle, speed control)
@@ -191,7 +191,7 @@ Press-out is a server-rendered multi-page application (MPA) built with Go, HTMX,
 
 ### Risk Mitigation Strategy
 
-**Technical Risk:** Pose estimation quality on real gym video (occlusion, lighting, bystanders) is the highest-risk component. Mitigation: ml5.js MoveNet runs client-side with no cloud dependency. Spike validated good detection quality on real weightlifting footage. If pose fails, video uploads without keypoints and downstream stages degrade gracefully.
+**Technical Risk:** Pose estimation quality on real gym video (occlusion, lighting, bystanders) is the highest-risk component. Mitigation: YOLO26n-Pose runs server-side at 39.3 fps with 99.4% detection rate (spike validated on real weightlifting footage). 7.5MB model auto-downloads on first run. If pose fails, downstream stages degrade gracefully.
 
 **Resource Risk:** Solo developer building a 13-capability pipeline. Mitigation: each step is independently testable with clear validation criteria — no step depends on future steps being complete. Build sequentially, validate before proceeding.
 
@@ -263,9 +263,9 @@ Press-out is a server-rendered multi-page application (MPA) built with Go, HTMX,
 
 ### Integration
 
-- NFR6: System handles missing keypoints.json gracefully (pose estimation failed or was skipped client-side), continuing the pipeline without crashing
+- NFR6: System handles missing keypoints.json gracefully (pose estimation failed or was skipped), continuing the pipeline without crashing
 - NFR7: System handles LLM API unavailability gracefully, completing video processing without coaching feedback or phase segmentation
-- NFR8: System operates with no external infrastructure dependencies beyond the LLM API (Claude Code) and ml5.js CDN
+- NFR8: System operates with no external infrastructure dependencies beyond the LLM API (Claude Code). Pose estimation runs locally via YOLO26n-Pose.
 
 ### Reliability
 

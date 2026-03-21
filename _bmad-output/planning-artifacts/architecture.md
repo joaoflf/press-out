@@ -24,7 +24,7 @@ _This document builds collaboratively through step-by-step discovery. Sections a
 
 - **Video Upload & Storage (FR1-3):** File upload, persistent storage, manual lift type assignment. Straightforward — the entry point to the pipeline.
 - **Video Processing (FR4-7):** Auto-trim (motion detection), auto-crop (person-barbell interaction), independent stage skipping, graceful degradation. This is where architectural complexity lives — each stage must be independently bypassable, and failure at any point passes input through unchanged.
-- **Pose Estimation & Visualization (FR8-10):** Keypoint detection from video frames (client-side via ml5.js MoveNet), skeleton overlay rendering, dual pre-rendered video output. Keypoints arrive via upload; skeleton rendering happens server-side frame-by-frame.
+- **Pose Estimation & Visualization (FR8-10):** Keypoint detection from video frames (server-side via YOLO26n-Pose Python subprocess), skeleton overlay rendering, dual pre-rendered video output. Keypoints produced by pose pipeline stage; skeleton rendering happens server-side frame-by-frame.
 - **Lift Metrics & Phase Analysis (FR11-18):** Six metrics computed from keypoint data (pull-to-catch ratio, bar path, velocity curve, joint angles, phase durations, key position snapshots), LLM-based phase segmentation with timeline markers. Computation layer that transforms raw keypoints into structured analysis.
 - **Coaching Intelligence (FR19-21):** LLM-generated diagnosis with causal chain, physical cue referencing specific metrics, lift-type-aware feedback. Async — may complete after the rest of the pipeline.
 - **Lift Management (FR22-24):** List view, detail view, deletion with cascading cleanup of all associated files and data. Simple CRUD with file lifecycle management.
@@ -49,8 +49,8 @@ _This document builds collaboratively through step-by-step discovery. Sections a
 
 - **Language/framework:** Go backend, HTMX + Tailwind CSS + DaisyUI frontend, server-rendered
 - **Storage:** SQLite for structured data, filesystem for video files and keypoint data
-- **External APIs:** LLM API via Claude Code headless (coaching + phase segmentation). Pose estimation runs client-side via ml5.js MoveNet — no external API.
-- **System dependency:** FFmpeg (required for video trim, crop, skeleton rendering, and thumbnail extraction — invoked via `exec.Command`)
+- **External APIs:** LLM API via Claude Code headless (coaching + phase segmentation). Pose estimation runs server-side via YOLO26n-Pose Python subprocess managed by uv — no external API.
+- **System dependencies:** FFmpeg (required for video trim, crop, skeleton rendering, and thumbnail extraction — invoked via `exec.Command`), uv + Python 3 (required for YOLO26n-Pose pose estimation — invoked via `exec.CommandContext`)
 - **Deployment:** Single binary, no container orchestration, no external infrastructure
 - **Browser:** Chrome-only (mobile primary) — enables modern CSS/HTML features without polyfills
 - **Build tooling:** No npm/node — Tailwind standalone CLI, no JavaScript build step
@@ -62,7 +62,7 @@ _This document builds collaboratively through step-by-step discovery. Sections a
 - **Pipeline orchestration:** Sequential stage execution with per-stage skip logic, progress event emission, and re-trigger capability. The orchestrator must track stage completion, emit SSE events, handle partial failures, and allow re-running on existing uploads.
 - **File lifecycle management:** Each lift produces multiple file artifacts (original video, trimmed video, cropped video, skeleton-overlay video, keypoint data, thumbnails). Deletion must cascade cleanly. Storage paths must be predictable and organized.
 - **SSE event architecture:** Multiple UI contexts (list view compact indicator, detail view full checklist, coaching placeholder) consume pipeline events. The SSE layer must support per-lift event streams that multiple clients can subscribe to.
-- **Video processing performance budget:** The 3-minute pipeline target requires careful allocation of compute time across 5 server-side stages (pose estimation runs client-side before upload). This may influence whether stages run in-process or as background tasks, and whether any stages can overlap.
+- **Video processing performance budget:** The 3-minute pipeline target requires careful allocation of compute time across 6 server-side stages (Trim → Pose → Crop → Skeleton → Metrics → Coaching). Pose estimation at ~9s for a 12s video fits comfortably within the budget. This may influence whether stages run sequentially or need parallelization, and whether any stages can overlap.
 
 ## Starter Template Evaluation
 
@@ -293,7 +293,7 @@ web/templates/
 **Configuration: Environment variables with defaults**
 - Optional with defaults: `PORT` (8080), `DATA_DIR` (./data), `DB_PATH` (./data/press-out.db)
 - Claude Code manages its own authentication — no LLM API key needed
-- Rationale: Minimal config surface. All config has sensible defaults. No cloud API credentials required — pose estimation runs client-side via ml5.js.
+- Rationale: Minimal config surface. All config has sensible defaults. No cloud API credentials required — pose estimation runs server-side via YOLO26n-Pose.
 
 **Logging: Go slog to stdout**
 - Structured JSON logging via Go's `slog` package (stdlib)
@@ -303,12 +303,13 @@ web/templates/
 
 ### External Integration Architecture
 
-**ml5.js MoveNet (Client-Side Pose Estimation)**
-- MoveNet SINGLEPOSE_THUNDER model loaded via ml5.js CDN in the browser
-- Processes video frame-by-frame at 30fps on a canvas element, extracts 17 COCO keypoints per frame
-- Keypoints normalized (0-1), smoothed (7-frame averaging window), exported as keypoints.json
-- Uploaded alongside the video as a multipart form field — no server-side pose estimation
-- Error handling: if pose estimation fails in browser, video uploads without keypoints.json; downstream stages handle missing file gracefully
+**YOLO26n-Pose (Server-Side Pose Estimation)**
+- YOLO26n-Pose model (7.5MB, auto-downloaded on first run) from ultralytics
+- Runs as a Python subprocess via `exec.CommandContext(ctx, "uv", "run", "scripts/pose.py", videoPath, "-o", keypointsPath)`
+- Processes video frame-by-frame at ~39 fps on CPU, extracts 17 COCO keypoints per frame
+- Keypoints normalized (0-1), exported as keypoints.json in the lift directory
+- Python dependency management via uv (pyproject.toml + uv.lock at project root)
+- Error handling: if pose estimation fails, keypoints.json is not written; downstream stages handle missing file gracefully
 - Affects: FR8 (keypoint detection)
 
 **Claude Code Headless: Subprocess runner**
@@ -337,7 +338,7 @@ web/templates/
 - Templates depend on route structure (HTMX endpoints) and data models (sqlc types)
 - Makefile orchestrates Go build + Tailwind build + sqlc generate
 - Claude Code subprocess runner depends on Claude Code being installed and authenticated on the VPS
-- Upload handler accepts keypoints.json from client-side pose estimation
+- Pose stage produces keypoints.json consumed by crop, skeleton, and metrics stages
 
 ## Implementation Patterns & Consistency Rules
 
@@ -380,6 +381,7 @@ internal/handler/lift.go           -- HTTP handlers for lift CRUD
 internal/handler/sse.go            -- SSE endpoint handler
 internal/pipeline/pipeline.go      -- orchestrator
 internal/pipeline/stages/trim.go   -- trim stage
+internal/pipeline/stages/pose.go   -- pose estimation stage (YOLO26n-Pose via uv subprocess)
 internal/pipeline/stages/crop.go   -- crop stage
 internal/pipeline/stages/skeleton.go -- skeleton rendering stage
 internal/pipeline/stages/metrics.go  -- metrics computation stage
@@ -388,7 +390,7 @@ internal/storage/storage.go        -- file storage operations
 internal/storage/db.go             -- database operations
 internal/sse/broker.go             -- SSE event broker
 internal/ffmpeg/ffmpeg.go          -- FFmpeg/ffprobe subprocess helper
-internal/pose/pose.go              -- pose.Result types and keypoints.json serialization (used by upload handler and downstream stages)
+internal/pose/pose.go              -- pose.Result types and keypoints.json serialization (used by pose stage and downstream stages)
 internal/claude/runner.go          -- Claude Code subprocess runner
 ```
 
@@ -487,6 +489,8 @@ press-out/
 ├── go.mod
 ├── go.sum
 ├── sqlc.yaml
+├── pyproject.toml                         -- Python project config (ultralytics, opencv-python)
+├── uv.lock                               -- uv lockfile for reproducible Python deps
 ├── tailwind.config.js
 ├── .env.example
 ├── .gitignore
@@ -513,6 +517,8 @@ press-out/
 │   │   └── stages/
 │   │       ├── trim.go                -- auto-trim via motion detection
 │   │       ├── trim_test.go
+│   │       ├── pose.go                -- pose estimation stage (YOLO26n-Pose)
+│   │       ├── pose_test.go
 │   │       ├── crop.go                -- auto-crop via person-barbell interaction
 │   │       ├── crop_test.go
 │   │       ├── skeleton.go            -- skeleton overlay rendering
@@ -546,6 +552,9 @@ press-out/
 │       ├── lifts.sql                  -- CRUD queries for lifts
 │       ├── metrics.sql                -- insert/select metrics per lift
 │       └── phases.sql                 -- insert/select phases per lift
+│
+├── scripts/
+│   └── pose.py                           -- YOLO26n-Pose inference script
 │
 ├── web/
 │   ├── templates/
@@ -633,7 +642,7 @@ press-out/
 **Video Processing (FR4-8):**
 - `internal/pipeline/pipeline.go` — orchestrator with skip logic
 - `internal/pipeline/stages/trim.go` — FR4 (auto-trim)
-- `internal/pipeline/stages/pose.go` — FR8 (keypoint detection, runs before crop)
+- `internal/pipeline/stages/pose.go` — FR8 (YOLO26n-Pose keypoint detection via Python subprocess, runs before crop)
 - `internal/pipeline/stages/crop.go` — FR5 (auto-crop using keypoint bounding box)
 - `internal/pose/` — pose.Result types and keypoints.json serialization
 - `internal/pipeline/stage.go` — FR7 (independent stage interface)
@@ -675,15 +684,15 @@ press-out/
 - `pipeline/stages` -> `pose`, `claude`: external service calls
 
 **External Integrations:**
-- **ml5.js MoveNet** (browser): Client-side pose estimation, produces keypoints.json uploaded with video
+- **YOLO26n-Pose** (`scripts/pose.py`): Python subprocess via uv, produces keypoints.json in lift directory
 - **Claude Code** (`internal/claude/runner.go`): Subprocess execution with structured prompt, parses stdout response
 
 **Data Flow:**
 ```
-Browser: ml5.js bodyPose -> keypoints.json (client-side, before upload)
-Upload (HTTP) -> storage.CreateLift() -> SQLite row + original.mp4 + keypoints.json
+Upload (HTTP) -> storage.CreateLift() -> SQLite row + original.mp4
   -> pipeline.Run() [goroutine]
     -> trim.Run()     -> trimmed.mp4 (or skip)
+    -> pose.Run()     -> keypoints.json (YOLO26n-Pose via uv subprocess)
     -> crop.Run()     -> cropped.mp4 + crop-params.json + thumbnail.jpg (uses keypoints for bounding box)
     -> skeleton.Run() -> skeleton.mp4 (transforms keypoints to cropped frame via crop-params.json)
     -> metrics.Run()  -> SQLite metrics rows
@@ -710,7 +719,7 @@ dev:              air  # hot-reload for development
 
 ### Coherence Validation
 
-**Decision Compatibility:** All decisions are compatible. Go stdlib `net/http` (1.22+) + HTMX + Tailwind/DaisyUI is an established pattern. mattn/go-sqlite3 + sqlc work natively together. SSE via Go stdlib pairs with HTMX's SSE extension. ml5.js (client-side pose) and Claude Code (subprocess) integrate independently without interference. FFmpeg invoked via `exec.Command` from pipeline stages. No conflicting decisions found.
+**Decision Compatibility:** All decisions are compatible. Go stdlib `net/http` (1.22+) + HTMX + Tailwind/DaisyUI is an established pattern. mattn/go-sqlite3 + sqlc work natively together. SSE via Go stdlib pairs with HTMX's SSE extension. YOLO26n-Pose (Python subprocess via uv) and Claude Code (subprocess) integrate independently without interference. FFmpeg invoked via `exec.Command` from pipeline stages. No conflicting decisions found.
 
 **Pattern Consistency:** Naming conventions are unambiguous across layers (Go conventions for code, snake_case for SQL, kebab-case for templates/SSE). The Stage interface provides a single uniform pattern for all pipeline processing. The storage package as sole owner of paths and DB access prevents cross-agent inconsistency.
 
@@ -724,7 +733,7 @@ dev:              air  # hot-reload for development
 |---|---|---|---|
 | FR1-3 | Upload & Storage | handler/lift.go, storage/, lifts table | Covered |
 | FR4-7 | Video Processing | pipeline orchestrator, stages/trim, stages/crop, Stage interface | Covered |
-| FR8-10 | Pose & Visualization | ml5.js (client-side), stages/skeleton, pose/pose.go | Covered |
+| FR8-10 | Pose & Visualization | stages/pose (YOLO26n-Pose), stages/skeleton, pose/pose.go | Covered |
 | FR11-18 | Metrics & Phases | stages/metrics, stages/coaching, metrics + phases tables | Covered |
 | FR19-21 | Coaching | stages/coaching, claude/runner | Covered |
 | FR22-24 | Lift Management | handler/lift CRUD, templates, cascading delete | Covered |
@@ -779,7 +788,7 @@ dev:              air  # hot-reload for development
 **Architectural Decisions**
 - [x] Critical decisions documented with specific technologies
 - [x] Technology stack fully specified
-- [x] Integration patterns defined (ml5.js CDN for pose estimation, subprocess for Claude Code, exec.Command for FFmpeg)
+- [x] Integration patterns defined (Python subprocess via uv for pose estimation, subprocess for Claude Code, exec.Command for FFmpeg)
 - [x] Performance considerations addressed
 
 **Implementation Patterns**
@@ -817,6 +826,8 @@ dev:              air  # hot-reload for development
 **System Dependencies:**
 - Go (latest stable)
 - FFmpeg (system package — used by trim, crop, skeleton, and thumbnail stages via `exec.Command`)
+- uv (Python package manager — used to run YOLO26n-Pose pose estimation)
+- Python 3 (required by uv for YOLO pose estimation subprocess)
 - Tailwind CSS standalone CLI
 - sqlc CLI
 - Claude Code CLI (installed and authenticated on VPS)

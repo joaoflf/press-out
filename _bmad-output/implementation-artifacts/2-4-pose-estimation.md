@@ -1,146 +1,193 @@
-# Story 2.4: Client-Side Pose Estimation & Upload
+# Story 2.4: Server-Side Pose Estimation (YOLO)
 
 Status: draft
 
 ## Story
 
 As a lifter,
-I want the system to detect my body positions from the video before uploading,
+I want the system to detect my body positions from the video after uploading,
 so that my joint movements can be used for cropping, visualization, and analysis.
 
 ## Acceptance Criteria (BDD)
 
-1. **Given** the lifter selects a video in the upload modal, **When** the video is selected, **Then** the browser loads ml5.js bodyPose (MoveNet SINGLEPOSE_THUNDER) and processes the video frame-by-frame at 30fps on a canvas, **And** a progress indicator shows pose estimation progress (e.g., "Processing frame 120 / 360"), **And** 17 COCO-format keypoints are detected per frame (FR8), **And** keypoint coordinates are normalized (0-1 relative to video dimensions), **And** keypoint smoothing (7-frame averaging window) is applied to reduce jitter
+1. **Given** a video has been uploaded and the pipeline reaches the pose stage, **When** the pose stage runs, **Then** YOLO26n-Pose detects body keypoints via Python subprocess (`uv run scripts/pose.py`), **And** 17 COCO-format keypoints are detected per frame (FR8), **And** keypoint coordinates are normalized (0-1 relative to video dimensions), **And** per-frame bounding boxes are computed from detection boxes, **And** keypoints.json is saved to the lift-ID directory
 
-2. **Given** client-side pose estimation completes, **When** the lifter selects a lift type and taps submit, **Then** the upload sends both the video file and keypoints.json as multipart form fields, **And** the server stores keypoints.json in the lift-ID directory alongside original.mp4, **And** the server pipeline starts with keypoints.json already available for downstream stages (crop, skeleton, metrics)
+2. **Given** the pose stage completes successfully, **When** the pipeline continues to downstream stages, **Then** keypoints.json is available for crop, skeleton, and metrics stages
 
-3. **Given** client-side pose estimation fails or detects no poses, **When** the upload proceeds, **Then** the video is still uploaded without keypoints.json, **And** downstream stages that depend on keypoints handle the missing file gracefully (FR6), **And** no error screen is shown to the lifter
+3. **Given** the pose stage fails (Python subprocess error, model download failure, timeout), **When** the orchestrator handles the error, **Then** the error is logged with slog, **And** keypoints.json is not written, **And** the pipeline continues — downstream stages handle missing keypoints gracefully (FR6), **And** no error screen is shown to the lifter
 
-4. **Given** the upload completes and the pipeline starts, **When** the trim stage runs, **Then** the video is trimmed as in Story 2.3, **And** the pipeline continues with cropping, skeleton, metrics, and coaching stages
+4. **Given** a frame contains no detected person, **When** the pose stage processes that frame, **Then** the frame is included in keypoints.json with an empty keypoints array and a full-frame bounding box `{left:0, top:0, right:1, bottom:1}`
 
 ## Prerequisites
 
-- Story 1.2 (Upload a Lift Video) must be complete — this story modifies the upload handler and modal.
-- Story 2.2 (FFmpeg Integration & Verification) must be complete — the pipeline uses FFmpeg for trimming.
-- Story 2.3 (Auto-Trim) must be complete — the pipeline runs the trim stage after upload.
+- Story 1.2 (Upload a Lift Video) must be complete — this story modifies the upload handler to remove keypoints multipart field parsing.
+- Story 2.2 (FFmpeg Integration & Verification) must be complete — establishes the subprocess execution pattern.
+- Story 2.3 (Auto-Trim) must be complete — the trim stage runs before pose in the pipeline.
+- `uv` and Python 3 must be installed on the system (checked via `make check-deps`).
 
 ## Tasks / Subtasks
 
-### Task 1: Add ml5.js pose estimation to upload flow
+### Task 1: Create Python pose estimation script
 
-- [ ] Load ml5.js via CDN (`https://unpkg.com/ml5@1/dist/ml5.js`) in `web/templates/layouts/base.html` (or conditionally in upload modal)
-- [ ] Create pose estimation JavaScript in `web/static/app.js` (or a dedicated `pose.js`):
-  - [ ] On video file selection: load video into a hidden `<video>` element, create an offscreen `<canvas>`
-  - [ ] Initialize `ml5.bodyPose("MoveNet", { modelType: "SINGLEPOSE_THUNDER" })`
-  - [ ] Process frames sequentially: seek to each frame (1/30s intervals), draw to canvas, call `bodyPose.detect(canvas)`
-  - [ ] Normalize keypoint coordinates to 0-1 range (divide by video dimensions)
-  - [ ] Apply 7-frame smoothing window (average x, y, confidence across neighboring frames for keypoints with confidence > 0.15)
-  - [ ] Compute per-frame bounding box from ml5's `box` property (normalize to 0-1)
-  - [ ] Build `keypoints.json` matching `pose.Result` format: `{ sourceWidth, sourceHeight, frames[]{timeOffsetMs, boundingBox{left,top,right,bottom}, keypoints[]{name, x, y, confidence}} }`
-  - [ ] Store the JSON blob in memory until form submission
-- [ ] Reference implementation: `web/static/pose-spike.html` (working spike with all the above logic)
+- [ ] Create `scripts/pose.py` — production version based on spike (`spikes/yolo-pose/pose_spike.py`)
+  - [ ] Accept CLI args: `video_path` (positional), `-o/--output` (keypoints.json path), `-m/--model` (default: `yolo26n-pose`), `--fps` (default: 30)
+  - [ ] Load YOLO26n-Pose model via ultralytics
+  - [ ] Process video frame-by-frame using OpenCV, sample at target fps using `frame_step = max(1, round(native_fps / target_fps))` — for a 30fps source this processes every frame, for 60fps every other frame
+  - [ ] For each frame: run YOLO inference, extract 17 COCO keypoints + bounding box from the first (highest-confidence) detection — YOLO sorts detections by confidence by default, so index 0 is always highest
+  - [ ] For frames with no person detected: output an empty keypoints array and a full-frame bounding box `{left:0, top:0, right:1, bottom:1}`
+  - [ ] Normalize all coordinates to 0-1 range (divide by source dimensions)
+  - [ ] Output keypoints.json matching `pose.Result` format: `{ sourceWidth, sourceHeight, frames[]{timeOffsetMs, boundingBox{left,top,right,bottom}, keypoints[]{name, x, y, confidence}} }`
+  - [ ] Exit code 0 on success, non-zero on failure
+  - [ ] Print progress to stderr (Go stage can log it)
 
-### Task 2: Add pose estimation progress UI to upload modal
+### Task 2: Create Python project configuration
 
-- [ ] After video file selection, show a progress indicator in the upload modal
-- [ ] Progress format: "Processing frame N / total" with a progress bar
-- [ ] Lift type selector and submit button remain disabled until pose estimation completes (or fails)
-- [ ] On completion: enable lift type selector and submit button
-- [ ] On failure: enable lift type selector and submit button anyway (video uploads without keypoints)
-- [ ] No "pose estimation failed" error message shown to user — silent degradation
+- [ ] Create `pyproject.toml` at project root:
+  ```toml
+  [project]
+  name = "press-out-scripts"
+  version = "0.1.0"
+  requires-python = ">=3.10"
+  dependencies = [
+      "ultralytics>=8.0",
+      "opencv-python-headless>=4.0",
+  ]
+  ```
+  Note: use `opencv-python-headless` (not `opencv-python`) — same API without Qt/GUI deps, much smaller install on a server.
+- [ ] Run `uv lock` to generate `uv.lock`
+- [ ] Add `uv.lock` to git (reproducible deps)
+- [ ] Add `.venv/` to `.gitignore` (uv creates local venv)
 
-### Task 3: Modify upload handler to accept keypoints.json
+### Task 3: Create Go pose estimation pipeline stage
 
-- [ ] In `internal/handler/lift.go` (POST /lifts handler):
-  - [ ] Parse multipart form with existing `video` field + new optional `keypoints` field
-  - [ ] If `keypoints` field is present: read the data, validate it is valid JSON, save to `storage.LiftFile(dataDir, liftID, storage.FileKeypoints)`
-  - [ ] If `keypoints` field is absent: proceed without it (no error)
-  - [ ] Save keypoints.json BEFORE starting the pipeline (like original.mp4 per NFR10)
-- [ ] Server-side validation of keypoints.json:
-  - [ ] Must be valid JSON
-  - [ ] Must have `sourceWidth` and `sourceHeight` as positive integers
-  - [ ] Must have `frames` array (may be empty)
-  - [ ] If validation fails: log warning, discard keypoints, proceed with upload (no error to user)
+- [ ] Create `internal/pipeline/stages/pose.go`:
+  - [ ] `PoseStage` struct with `ProjectRoot string` field — set in `main.go` to the project root directory, used as `cmd.Dir` for subprocess execution
+  - [ ] `PoseStage` implements `pipeline.Stage` interface
+  - [ ] `Name()` returns `"Pose estimation"` (matches `StagePoseEstimation` constant)
+  - [ ] `Run(ctx context.Context, input StageInput) (StageOutput, error)` implementation:
+    - [ ] Construct output path: `storage.LiftFile(input.DataDir, input.LiftID, storage.FileKeypoints)`
+    - [ ] Build command: `exec.CommandContext(ctx, "uv", "run", "scripts/pose.py", input.VideoPath, "-o", keypointsPath)`
+    - [ ] Set `cmd.Dir = s.ProjectRoot` — ensures `uv run` finds `pyproject.toml` and the script path resolves correctly regardless of where the Go binary is invoked from
+    - [ ] Capture stdout/stderr — log stderr lines via slog at Info level (contains progress), log stdout only on error
+    - [ ] On success: return `StageOutput{VideoPath: input.VideoPath}` (pose doesn't produce a video, passes through)
+    - [ ] On error: return error to orchestrator for graceful handling
+  - [ ] Log with slog: `lift_id`, `stage`, `duration_ms`, `error`
 
-### Task 4: Simplify pose package to shared types only
+### Task 4: Register pose stage in pipeline
 
-- [ ] Rename `internal/pose/client.go` to `internal/pose/pose.go` (or create fresh)
-- [ ] Keep only the types needed for keypoints.json deserialization:
-  - [ ] `Result` struct: `SourceWidth int`, `SourceHeight int`, `Frames []Frame`
-  - [ ] `Frame` struct: `TimeOffsetMs int64`, `BoundingBox BoundingBox`, `Keypoints []Keypoint`
-  - [ ] `BoundingBox` struct: `Left float64`, `Top float64`, `Right float64`, `Bottom float64`
-  - [ ] `Keypoint` struct: `Name string`, `X float64`, `Y float64`, `Confidence float64`
-  - [ ] JSON struct tags on all fields
-  - [ ] Named constants for 17 COCO landmark names
-- [ ] Remove `Client` interface — no server-side pose provider
-- [ ] Remove `internal/pose/videointel.go` and `internal/pose/videointel_test.go`
-- [ ] Remove `internal/pose/videointel_integration_test.go` (if exists)
+- [ ] In `internal/pipeline/stage.go`:
+  - [ ] Add `StagePoseEstimation = "Pose estimation"` constant
+  - [ ] Update stage count references from 5 to 6
+- [ ] In `cmd/press-out/main.go`:
+  - [ ] Add `&stages.PoseStage{ProjectRoot: projectRoot}` as the second stage (after TrimStage, before CropStage)
+  - [ ] Derive `projectRoot` — the directory containing `pyproject.toml` (typically the working directory, or derived from the executable path)
+  - [ ] Pipeline order: Trim → Pose → Crop → Skeleton → Metrics → Coaching
+- [ ] In `web/templates/partials/pipeline-stages.html`:
+  - [ ] Add "Pose estimation" as the second stage in the hardcoded stage list (after "Trimming", before "Cropping")
+  - [ ] Update both full and compact variants to reflect 6 stages
 
-### Task 5: Remove server-side pose pipeline stage
+### Task 5: Remove client-side ml5.js pose estimation code
 
-- [ ] Delete `internal/pipeline/stages/pose.go` and `internal/pipeline/stages/pose_test.go`
-- [ ] In `internal/pipeline/stage.go`: remove `StagePoseEstimation` from `DefaultStages()` — pipeline is now: Trimming → Cropping → Rendering skeleton → Computing metrics → Generating coaching (5 stages)
-- [ ] In `cmd/press-out/main.go`: remove pose client creation, remove `NewPoseStage(client)`, remove `defer poseClient.Close()`
-- [ ] In `internal/config/config.go`: remove `MediaPipeAPIKey` field if still present
+- [ ] In `web/templates/layouts/base.html`: remove ml5.js CDN script tag
+- [ ] In `web/static/app.js`: remove all pose estimation JavaScript (ml5 model loading, canvas processing, frame extraction, smoothing, keypoints JSON generation)
+- [ ] In `web/templates/partials/upload-modal.html`: remove pose progress UI elements (progress bar, frame counter), remove keypoints hidden form field
+- [ ] In `internal/handler/lift.go`: remove keypoints multipart field parsing from POST /lifts handler — upload now accepts only `video` and `lift_type` fields
+- [ ] Delete `web/static/pose-spike.html` (ml5.js spike, superseded by YOLO spike)
+- [ ] Verify removal is complete: `grep -r "ml5" web/ internal/` must return zero matches
 
-### Task 6: Remove Google Cloud Video Intelligence dependency
+### Task 6: Update Makefile
 
-- [ ] Run `go mod tidy` to remove `cloud.google.com/go/videointelligence` from `go.mod` / `go.sum`
-- [ ] Verify no remaining imports reference the videointelligence package
-- [ ] Remove `.env.example` reference to `GOOGLE_APPLICATION_CREDENTIALS` (if present)
+- [ ] Add `check-deps` target: verify `uv` and `python3` are installed (alongside existing `ffmpeg` check)
+- [ ] Add `uv-sync` target: `uv sync` to install Python deps
 
-### Task 7: Update upload form to send keypoints as multipart field
+### Task 7: Generate test fixture
 
-- [ ] In `web/templates/partials/upload-modal.html`: form must use `multipart/form-data` (already does for video)
-- [ ] JavaScript on form submit: create a `Blob` from the keypoints JSON, append as a form field named `keypoints` with filename `keypoints.json`
-- [ ] If pose estimation failed/skipped: do not include the `keypoints` field
+Depends on Tasks 1 and 2 being complete.
+
+- [ ] Run `uv run scripts/pose.py testdata/videos/sample-lift.mp4 -o testdata/keypoints-sample.json` to generate the test fixture from YOLO output
+- [ ] Commit `testdata/keypoints-sample.json` — used by all downstream stage tests (crop, skeleton, metrics)
 
 ### Task 8: Verification tests
 
-- [ ] **Keypoints test fixture:** Generate `testdata/keypoints-sample.json` from the spike using the real test video (`testdata/videos/sample-lift.mp4`). This fixture is used by all server-side tests.
+- [ ] **Go test — pose stage produces keypoints.json:**
+  - [ ] Create a lift directory with the sample video
+  - [ ] Run PoseStage.Run() with valid input (set ProjectRoot to project root)
+  - [ ] Assert keypoints.json is written to lift directory
+  - [ ] Assert keypoints.json is valid JSON with sourceWidth, sourceHeight, frames
+  - [ ] Assert frames have keypoints with normalized coordinates (0-1)
+  - [ ] Skip if `uv` is not installed (`t.Skip("uv not available")`)
 
-- [ ] **Go test — upload handler accepts keypoints.json:**
-  - [ ] POST multipart with `video` (sample video) + `keypoints` (fixture JSON) + `lift_type`
-  - [ ] Assert HTTP 200 / redirect
-  - [ ] Assert `original.mp4` saved to lift directory
-  - [ ] Assert `keypoints.json` saved to lift directory
-  - [ ] Assert keypoints.json content matches fixture (valid JSON, has sourceWidth/sourceHeight/frames)
+- [ ] **Go test — test fixture deserializes into pose.Result:**
+  - [ ] Read `testdata/keypoints-sample.json`
+  - [ ] Deserialize into `pose.Result`
+  - [ ] Assert `SourceWidth > 0` and `SourceHeight > 0`
+  - [ ] Assert `len(Frames) > 0`
+  - [ ] Assert first frame has 17 keypoints
+  - [ ] Assert all keypoint coordinates are in 0-1 range
+  - [ ] Assert all keypoint names are valid COCO landmark names
+  - [ ] Assert bounding box values are in 0-1 range
 
-- [ ] **Go test — upload handler without keypoints:**
-  - [ ] POST multipart with `video` + `lift_type` only (no keypoints field)
-  - [ ] Assert upload succeeds
-  - [ ] Assert `keypoints.json` does NOT exist in lift directory
+- [ ] **Go test — pose stage handles subprocess failure:**
+  - [ ] Run PoseStage with a non-existent video path
+  - [ ] Assert error is returned (not panic)
+  - [ ] Assert keypoints.json is NOT written
 
-- [ ] **Go test — pipeline runs with pre-existing keypoints.json:**
-  - [ ] Create a lift directory with `original.mp4` + `keypoints.json` (fixture)
-  - [ ] Run pipeline — trim stage executes, keypoints.json remains available for crop stage
-  - [ ] Assert no pose stage runs (stage not in pipeline)
+- [ ] **Go test — pose stage respects context cancellation:**
+  - [ ] Run PoseStage with a cancelled context
+  - [ ] Assert error is returned promptly
 
-- [ ] **Go test — invalid keypoints.json rejected gracefully:**
-  - [ ] POST multipart with `keypoints` field containing invalid JSON
-  - [ ] Assert upload succeeds (video saved)
-  - [ ] Assert `keypoints.json` NOT saved (invalid data discarded)
+- [ ] **Go test — pipeline runs 6 stages with pose:**
+  - [ ] Create pipeline with all 6 stages
+  - [ ] Assert stage names and order: Trimming, Pose estimation, Cropping, Rendering skeleton, Computing metrics, Generating coaching
 
-- [ ] **ChromeDP test — upload page loads ml5.js:**
-  - [ ] Navigate to lift list page
-  - [ ] Open upload modal
-  - [ ] Assert ml5.js CDN script loaded (no 404 / network error)
+- [ ] **Go test — upload handler ignores keypoints field:**
+  - [ ] POST multipart with `video` + `lift_type` + `keypoints` (include a keypoints field)
+  - [ ] Assert upload succeeds (field is ignored, not rejected)
+  - [ ] Assert `keypoints.json` was NOT saved to the lift directory (handler no longer reads this field)
+
+- [ ] **Integration test — upload sample video through HTTP endpoint, verify pose estimation:**
+  - [ ] Start server on random test port with test database and test data dir
+  - [ ] POST multipart upload with `testdata/videos/sample-lift.mp4` + lift type "Snatch"
+  - [ ] Wait for pipeline to complete (poll for `keypoints.json` existence in lift directory, with timeout)
+  - [ ] Assert `keypoints.json` exists in the lift directory
+  - [ ] Deserialize into `pose.Result` — assert valid structure (sourceWidth, sourceHeight, frames with keypoints)
+  - [ ] Assert frame count is reasonable for the sample video (~350 frames at 30fps)
+  - [ ] Assert detection rate is high (>95% of frames have non-empty keypoints)
+  - [ ] Tear down server and test data
+  - [ ] Skip if `uv` or `ffmpeg` not installed
+
+- [ ] **Go test — ml5.js removal verification:**
+  - [ ] Walk `web/` and `internal/` directories
+  - [ ] Assert no file contains the string "ml5" (case-insensitive)
+  - [ ] This prevents regressions and confirms Task 5 is complete
+
+- [ ] **ChromeDP test — upload modal has no pose progress UI:**
+  - [ ] Navigate to lift list, open upload modal
   - [ ] Assert no JavaScript console errors
-  - [ ] Assert pose progress UI elements exist in DOM (hidden initially)
+  - [ ] Assert no pose progress elements in DOM (no elements with IDs/classes containing "pose-progress" or similar)
+  - [ ] Assert upload form has only video selector, lift type selector, and submit button
 
-- [ ] **Spike as reference:** `web/static/pose-spike.html` validates that ml5.js MoveNet detects all 17 COCO keypoints with good confidence on the sample weightlifting video. The story integrates this validated logic — it does not re-invent pose detection.
+- [ ] **ChromeDP test — pipeline stages show 6 stages including pose:**
+  - [ ] Upload a video to trigger processing
+  - [ ] Navigate to lift detail page while processing
+  - [ ] Assert pipeline stage checklist contains "Pose estimation" as the second stage
+  - [ ] Assert 6 total stages are displayed
 
 ## Dev Notes
 
-- **Spike reference:** `web/static/pose-spike.html` is a working prototype. Copy the core logic (model loading, frame-by-frame extraction, smoothing, JSON export) — do not start from scratch.
+- **Spike reference:** `spikes/yolo-pose/pose_spike.py` is the working prototype. The production `scripts/pose.py` should be a cleaned-up version — same core logic, same CLI interface, same output format.
 
-- **ml5.js MoveNet:** MoveNet SINGLEPOSE_THUNDER is the model. It's more accurate than SINGLEPOSE_LIGHTNING but still fast (~7s for 12s video at 30fps on desktop). Loaded via `ml5.bodyPose("MoveNet", { modelType: "SINGLEPOSE_THUNDER" })`.
+- **YOLO26n-Pose:** The `yolo26n-pose` model from ultralytics. 7.5MB, auto-downloads to `~/.cache/` on first run. Uses COCO 17-keypoint format. The spike validated 39.3 fps on CPU and 99.4% frame detection rate on the sample weightlifting video. YOLO sorts detections by confidence descending — `result.keypoints[0]` / `result.boxes[0]` is always the highest-confidence person.
 
-- **Canvas requirement:** The video element must be drawn to a canvas for ml5 detection. A hidden `<video>` element doesn't expose pixel data. The spike uses an offscreen canvas for processing.
+- **uv integration:** Go calls `exec.CommandContext(ctx, "uv", "run", "scripts/pose.py", videoPath, "-o", keypointsPath)` with `cmd.Dir` set to the project root. The `uv run` command automatically creates/uses a venv from `pyproject.toml` and installs dependencies on first run. No manual venv activation needed.
 
-- **Smoothing:** 7-frame window (3 frames each side). Averages x, y, confidence for keypoints with confidence > 0.15. Reduces jitter significantly in the skeleton overlay.
+- **Working directory:** The `PoseStage` struct has a `ProjectRoot` field set in `main.go`. This is used as `cmd.Dir` for the subprocess, ensuring `uv run` finds `pyproject.toml` and resolves `scripts/pose.py` correctly regardless of where the Go binary is invoked from (dev, systemd, tests).
 
-- **keypoints.json format:** Identical to what the Video Intelligence API produced — downstream stages (crop, skeleton, metrics) consume it the same way:
+- **Subprocess pattern:** Same as FFmpeg — Go manages the subprocess lifecycle, captures output, handles timeouts via context. The contract is: video path in, keypoints.json file out. Zero coupling between Go and Python.
+
+- **opencv-python-headless:** Use `opencv-python-headless` instead of `opencv-python`. Same API, no Qt/GUI dependencies, significantly smaller install (~30MB vs ~80MB). Server has no display — headless is the correct choice.
+
+- **keypoints.json format:** Identical to what ml5.js produced — same structure, same field names, same normalized coordinate system. Downstream stages (crop, skeleton, metrics) consume it identically:
   ```json
   {
     "sourceWidth": 1920,
@@ -158,53 +205,60 @@ so that my joint movements can be used for cropping, visualization, and analysis
   }
   ```
 
-- **17 COCO landmarks:** nose, left_eye, right_eye, left_ear, right_ear, left_shoulder, right_shoulder, left_elbow, right_elbow, left_wrist, right_wrist, left_hip, right_hip, left_knee, right_knee, left_ankle, right_ankle. Same as what Video Intelligence API returned.
+- **17 COCO landmarks:** nose, left_eye, right_eye, left_ear, right_ear, left_shoulder, right_shoulder, left_elbow, right_elbow, left_wrist, right_wrist, left_hip, right_hip, left_knee, right_knee, left_ankle, right_ankle.
 
-- **Primary person:** MoveNet SINGLEPOSE_THUNDER detects only one person by design — no multi-person selection logic needed (unlike the Video Intelligence API which could return multiple person tracks).
+- **Frames with no detection:** When YOLO detects no person in a frame, output an empty keypoints array `[]` and a full-frame bounding box `{left:0, top:0, right:1, bottom:1}`. This matches the spike behavior and ensures the frames array has consistent entries for every sampled frame.
 
-- **Pipeline stage count:** Server pipeline is now 5 stages (was 6). "Pose estimation" is removed. Update any hardcoded "6" references to "5" and "N of 6" to "N of 5".
+- **Frame sampling:** The `--fps` flag (default 30) controls sampling density. For a 30fps source, every frame is processed. For a 60fps source, every other frame is sampled (`frame_step = max(1, round(native_fps / target_fps))`). This keeps processing time proportional to video duration, not frame count.
 
-- **What this replaces:** This story replaces the server-side Video Intelligence API approach. The old `internal/pose/videointel.go`, `internal/pipeline/stages/pose.go`, and the `cloud.google.com/go/videointelligence` Go dependency are all removed.
+- **Pipeline stage count:** Server pipeline is now 6 stages (was 5 with ml5.js). Pose estimation runs after trim and before crop: Trimming → Pose estimation → Cropping → Rendering skeleton → Computing metrics → Generating coaching.
 
-- **Coordinate space:** Keypoints are in the coordinate space of the original video (before trim/crop). This is the same as before — crop stage reads these to compute a bounding box, skeleton stage transforms them to cropped-frame coordinates using `crop-params.json`.
+- **What this replaces:** This story replaces the client-side ml5.js MoveNet approach. The ml5.js CDN script, browser-side pose JavaScript, pose progress UI, and keypoints multipart upload field are all removed.
+
+- **Coordinate space:** Keypoints are in the coordinate space of the input video (trimmed if trim succeeded, otherwise original). The crop stage reads these to compute a bounding box, and the skeleton stage transforms them to cropped-frame coordinates using `crop-params.json`.
+
+- **Model auto-download:** YOLO26n-Pose model downloads automatically on first run (~7.5MB to `~/.cache/`). For CI/testing, the model can be pre-cached. The script handles this transparently.
 
 ### Architecture Compliance
 
-- Upload handler uses `storage.LiftFile()` for keypoints.json output path
-- Pipeline runs without a pose stage — trim → crop → skeleton → metrics → coaching
+- Implements `pipeline.Stage` interface: `Name() string` + `Run(ctx, StageInput) (StageOutput, error)`
+- Uses `storage.LiftFile()` for keypoints.json output path
+- Subprocess execution via `exec.CommandContext` (not `exec.Command`) — context version is required for timeout/cancellation support
+- Sets `cmd.Dir` to project root for reliable path resolution
 - Graceful degradation: missing keypoints.json means crop/skeleton/metrics stages skip or preserve full frame
-- Logs with `slog` using standard attributes: `lift_id`, `stage`, `error`
-- ChromeDP browser verification tests for upload page changes
+- Logs with `slog` using standard attributes: `lift_id`, `stage`, `duration_ms`, `error`
+- Returns errors, never panics — orchestrator handles all error recovery
 
 ### Project Structure Notes
 
 New files to create:
-- `testdata/keypoints-sample.json` — test fixture generated from spike
+- `scripts/pose.py` — YOLO pose estimation script
+- `pyproject.toml` — Python project config
+- `uv.lock` — Python dependency lockfile
+- `internal/pipeline/stages/pose.go` — Go pose stage
+- `internal/pipeline/stages/pose_test.go` — tests
+- `testdata/keypoints-sample.json` — test fixture (generated from YOLO)
 
 Files to modify:
-- `web/static/app.js` — add pose estimation logic (from spike)
-- `web/templates/partials/upload-modal.html` — add progress UI, keypoints form field
-- `web/templates/layouts/base.html` — add ml5.js CDN script
-- `internal/handler/lift.go` — accept keypoints multipart field
-- `internal/handler/lift_test.go` — upload handler tests with keypoints
-- `internal/pose/client.go` → rename to `internal/pose/pose.go`, keep types only
-- `internal/pipeline/stage.go` — remove StagePoseEstimation from DefaultStages
-- `cmd/press-out/main.go` — remove pose client wiring
+- `internal/pipeline/stage.go` — add `StagePoseEstimation` constant, update stage count
+- `cmd/press-out/main.go` — add PoseStage to pipeline stages list, derive project root
+- `internal/handler/lift.go` — remove keypoints multipart field parsing
+- `web/static/app.js` — remove ml5.js pose estimation code
+- `web/templates/layouts/base.html` — remove ml5.js CDN script tag
+- `web/templates/partials/upload-modal.html` — remove pose progress UI, keypoints field
+- `web/templates/partials/pipeline-stages.html` — add "Pose estimation" as second stage, update both full and compact variants to 6 stages
+- `Makefile` — add check-deps for uv and python3, add uv-sync target
 
 Files to delete:
-- `internal/pose/videointel.go`
-- `internal/pose/videointel_test.go`
-- `internal/pose/videointel_integration_test.go` (if exists)
-- `internal/pipeline/stages/pose.go`
-- `internal/pipeline/stages/pose_test.go`
+- `web/static/pose-spike.html` — ml5.js spike (superseded)
 
 ### References
 
-- [Source: architecture.md#External Integration Architecture] — ml5.js MoveNet integration
+- [Source: architecture.md#External Integration Architecture] — YOLO26n-Pose integration
 - [Source: architecture.md#Data Architecture] — keypoints.json in lift directory structure
 - [Source: epics.md#Story 2.4] — acceptance criteria
 - [Source: epics.md#FR8] — body keypoint detection
-- [Source: web/static/pose-spike.html] — working spike prototype
+- [Source: spikes/yolo-pose/pose_spike.py] — working spike prototype
 
 ## Dev Agent Record
 
