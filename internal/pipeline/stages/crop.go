@@ -18,7 +18,7 @@ import (
 const (
 	cropAspectW        = 9
 	cropAspectH        = 16
-	cropPaddingPercent = 0.15
+	cropPaddingPercent = 0.05
 )
 
 // CropParams holds the crop region and source dimensions for downstream coordinate transformation.
