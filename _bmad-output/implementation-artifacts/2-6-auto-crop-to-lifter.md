@@ -1,4 +1,4 @@
-# Story 2.5: Auto-Crop to Lifter
+# Story 2.6: Auto-Crop to Lifter
 
 Status: draft
 
@@ -66,7 +66,7 @@ so that I see only my lift without distracting bystanders or background.
   - [ ] Add `FileCropParams = "crop-params.json"` to storage constants
 
 - [ ] Register crop stage with pipeline (AC: 1)
-  - [ ] In `main.go`, add `&stages.CropStage{}` as the third stage in the pipeline's stage slice (after TrimStage and PoseStage)
+  - [ ] In `main.go`, add `&stages.CropStage{}` as the third stage in the pipeline's stage slice (after PoseStage and TrimStage)
 
 - [ ] Write unit tests `internal/pipeline/stages/crop_test.go` (AC: 1, 2, 3)
   - [ ] Test `CropStage.Name()` returns exactly `"Cropping"` (must match `StageCropping` constant from Story 2.1)
@@ -83,12 +83,12 @@ so that I see only my lift without distracting bystanders or background.
 ## Prerequisites
 
 - Story 2.2 (FFmpeg Integration & Verification) must be complete — this story depends on `ffmpeg.CropVideo()`, `ffmpeg.ExtractThumbnail()`, and `ffmpeg.GetDuration()`.
-- Story 2.4 (Server-Side Pose Estimation) must be complete — this story reads keypoints.json produced by the pose pipeline stage.
+- Story 2.5 (Pose-Based Video Trim) must be complete — this story receives the trimmed (or original) video as input and reads keypoints.json produced by pose estimation.
 
 ## Dev Notes
 
 - **Person selection is handled upstream by Story 2.4 (pose estimation).** YOLO26n-Pose selects the first (highest-confidence) person detected. The keypoints.json always contains a single person's data. The crop stage does not need multi-person logic — it computes the bounding box from the single person's keypoints directly.
-- The crop stage receives `StageInput.VideoPath` from the pose stage (which passes through the trimmed/original video unchanged). It also needs to read `keypoints.json` from the lift directory — this is NOT passed via StageInput but read directly from the filesystem using `storage.LiftFile(input.DataDir, input.LiftID, storage.FileKeypoints)`.
+- The crop stage receives `StageInput.VideoPath` from the trim stage (trimmed.mp4 if trim succeeded, otherwise the original video passed through). It also needs to read `keypoints.json` from the lift directory — this is NOT passed via StageInput but read directly from the filesystem using `storage.LiftFile(input.DataDir, input.LiftID, storage.FileKeypoints)`.
 - The keypoints.json includes per-frame `boundingBox` data from server-side YOLO26n-Pose detection. The crop stage uses these bounding boxes (not individual keypoints) to determine the crop region — compute the enclosing box across all frames, add padding, enforce 9:16. The skeleton stage (Story 3.1) is responsible for transforming keypoint coordinates to cropped-frame coordinates using crop-params.json.
 - For the 9:16 aspect ratio enforcement: compute the bounding box from keypoints, add padding, then adjust to 9:16. If the box is too wide for 9:16, increase height. If too tall, increase width. Center the adjustment around the bounding box center.
 - Thumbnail timing: extract at the midpoint of the video duration, which for a trimmed video should capture the lift itself. Use `ffmpeg.GetDuration()` to get the video length.
@@ -120,7 +120,7 @@ Files to modify:
 - [Source: architecture.md#Pipeline Stage Interface] — Stage interface definition
 - [Source: architecture.md#Data Architecture] — cropped.mp4, thumbnail.jpg, crop-params.json in lift directory
 - [Source: architecture.md#Process Patterns] — graceful degradation
-- [Source: epics.md#Story 2.5] — acceptance criteria
+- [Source: epics.md#Story 2.6] — acceptance criteria
 - [Source: epics.md#FR5] — identify and crop to lifter when multiple people in frame
 - [Source: epics.md#FR6] — preserve full video on low confidence
 - [Source: epics.md#Additional Requirements] — "Thumbnail generation: Extracted from processed video via FFmpeg, stored as thumbnail.jpg"

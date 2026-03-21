@@ -1,4 +1,4 @@
-# Story 2.6: Progressive Video Availability & Pipeline Re-trigger
+# Story 2.7: Progressive Video Availability & Pipeline Re-trigger
 
 Status: ready-for-dev
 
@@ -141,7 +141,7 @@ Files to modify:
 - [Source: architecture.md#Error Handling] — processing state derived from file existence, no error state in DB
 - [Source: architecture.md#Route Structure] — GET /lifts/{id} for lift detail
 - [Source: architecture.md#Video File Organization] — lift directory structure with all artifact filenames
-- [Source: epics.md#Story 2.5] — acceptance criteria
+- [Source: epics.md#Story 2.7] — acceptance criteria
 - [Source: epics.md#FR28] — video playback starts immediately without waiting for analysis
 - [Source: epics.md#NFR3] — video playback begins within 1 second
 - [Source: epics.md#NFR11] — failed pipeline re-triggerable without re-upload

@@ -87,7 +87,7 @@ This document provides the complete epic and story breakdown for press-out, deco
 - UX-DR2: System font stack (`-apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif`) — no web fonts, no loading delay
 - UX-DR3: Typography scale — metric values text-2xl bold (largest on screen), page title text-xl semibold, section headers text-lg medium, body text-sm normal, metric labels text-xs medium, UI chrome text-xs medium
 - UX-DR4: Video Player with Floating Controls — full-width edge-to-edge video element, position relative container, floating speed strip (0.25x/0.5x/1x) at bottom with gradient backdrop (`bg-gradient-to-t from-black/40`), mode badge in bottom-right ("Skeleton"/"Clean"), entire video surface as tap target for toggle, sticky positioning while scrolling
-- UX-DR5: Pipeline Stage Checklist — vertical list of 6 stages (Trimming, Pose estimation, Cropping, Rendering skeleton, Computing metrics, Generating coaching) with three states per stage (pending: dimmed, active: pulsing dot, complete: sage checkmark). Two variants: compact (list item: current stage + "N of 6") and full (detail view: all 6 stages visible).
+- UX-DR5: Pipeline Stage Checklist — vertical list of 6 stages (Pose estimation, Trimming, Cropping, Rendering skeleton, Computing metrics, Generating coaching) with three states per stage (pending: dimmed, active: pulsing dot, complete: sage checkmark). Two variants: compact (list item: current stage + "N of 6") and full (detail view: all 6 stages visible).
 - UX-DR6: Phase Timeline Bar — horizontal segmented bar, full-width, rounded corners, segments proportional to phase duration, sage gradient palette colors. Tap segment to seek video to phase start, label appears above selected segment (e.g., "2nd Pull — 0.31s"), selected segment highlighted at full opacity with slight scale, others dimmed
 - UX-DR7: Metric Cells in 3x2 grid (grid-cols-3) — six metric-specific variants: pull-to-catch ratio (vertical ratio bar + numeric value, no expand), bar path (mini X-Y trajectory, tap-to-expand with axis labels and phase markers), velocity curve (mini sparkline + peak value, tap-to-expand with phase shading), joint angles (mini stick figure at catch + angle values, tap-to-expand all four positions), phase durations (mini stacked bar + total duration, tap-to-expand with individual ms values), total lift duration (large numeric value, no expand)
 - UX-DR8: Coaching Card — no card container, coaching cue in `text-lg font-semibold` as hero text (first content below video), divider, diagnosis in `text-sm text-gray-500`, left border accent in info color (#9BB0BA). DaisyUI skeleton placeholder while loading, SSE swap when ready
@@ -120,7 +120,7 @@ Every story that produces or modifies HTML pages or partials **must** include Ch
 
 **Stories requiring ChromeDP verification:**
 - Epic 1: Stories 1.1, 1.2, 1.3, 1.4, 1.5 (all have UI)
-- Epic 2: Stories 2.1 (pipeline progress UI), 2.6 (progressive video availability)
+- Epic 2: Stories 2.1 (pipeline progress UI), 2.7 (progressive video availability)
 - Epic 3: Story 3.2 (video player with toggle & speed controls)
 - Epic 4: Stories 4.3 (phase timeline), 4.4 (metrics display grid)
 - Epic 5: Story 5.2 (coaching card display)
@@ -165,7 +165,7 @@ The lifter can upload a video from their phone, assign a lift type, browse all t
 **FRs covered:** FR1, FR2, FR3, FR22, FR23, FR24
 
 ### Epic 2: Auto-Process Videos with Live Progress
-After uploading, the system automatically trims the video to just the lift, detects body keypoints via pose estimation, and crops to the lifter using keypoint data. The lifter sees real-time progress as each processing stage completes. Video is viewable immediately even while processing continues. Includes pipeline orchestrator, SSE broker, trim/pose/crop stages, graceful degradation.
+After uploading, the system detects body keypoints via pose estimation, trims the video to just the lift using keypoint data, and crops to the lifter. The lifter sees real-time progress as each processing stage completes. Video is viewable immediately even while processing continues. Includes pipeline orchestrator, SSE broker, pose/trim/crop stages, graceful degradation.
 **FRs covered:** FR4, FR5, FR6, FR7, FR8, FR28, FR29, FR30
 
 ### Epic 3: Skeleton Overlay & Video Review
@@ -306,7 +306,7 @@ So that my lift list stays clean and relevant.
 
 ## Epic 2: Auto-Process Videos with Live Progress
 
-After uploading, the system automatically trims the video to just the lift, detects body keypoints via pose estimation, and crops to the lifter using keypoint data. The lifter sees real-time progress as each processing stage completes. Video is viewable immediately even while processing continues.
+After uploading, the system detects body keypoints via pose estimation, trims the video to just the lift using keypoint data, and crops to the lifter. The lifter sees real-time progress as each processing stage completes. Video is viewable immediately even while processing continues.
 
 ### Story 2.1: Pipeline Orchestrator & SSE Progress
 
@@ -422,7 +422,39 @@ So that my joint movements can be used for cropping, visualization, and analysis
 **And** the pipeline continues — downstream stages handle missing keypoints gracefully (FR6)
 **And** no error screen is shown to the lifter
 
-### Story 2.5: Auto-Crop to Lifter
+### Story 2.5: Pose-Based Video Trim
+
+As a lifter,
+I want the system to trim my video to just the lift using detected body positions,
+So that I can review only the relevant portion without setup or post-lift footage.
+
+**Acceptance Criteria:**
+
+**Given** keypoints.json exists from the pose estimation stage
+**When** the trim stage runs
+**Then** the system analyzes frame-to-frame keypoint displacement to detect the lift's start and end
+**And** the trimmed video is saved as trimmed.mp4 in the lift-ID directory via FFmpeg
+**And** padding is added around the detected lift boundaries
+
+**Given** the keypoint-based detection confidence falls below the threshold
+**When** the trim stage cannot confidently identify the lift boundaries
+**Then** the full original video is preserved as the trim output (FR6)
+**And** the stage completes without error (graceful degradation)
+**And** downstream stages receive the full video as input
+
+**Given** keypoints.json does not exist (pose estimation was skipped)
+**When** the trim stage is reached
+**Then** the full original video is preserved as the trim output (FR6)
+**And** the stage completes without error
+**And** downstream stages receive the full video as input
+
+**Given** the trim stage encounters an FFmpeg error
+**When** the subprocess fails
+**Then** the error is logged with slog
+**And** the stage returns an error to the orchestrator
+**And** the orchestrator skips the stage and passes the original video forward (FR7)
+
+### Story 2.6: Auto-Crop to Lifter
 
 As a lifter,
 I want the system to automatically crop the video to focus on me,
@@ -453,7 +485,7 @@ So that I see only my lift without distracting bystanders or background.
 **Then** the system identifies the person with the most vertical movement in the keypoint data as the lifter (FR5)
 **And** other people in the frame are excluded by the crop
 
-### Story 2.6: Progressive Video Availability & Pipeline Re-trigger
+### Story 2.7: Progressive Video Availability & Pipeline Re-trigger
 
 As a lifter,
 I want to watch my video immediately after upload without waiting for all processing to finish,
