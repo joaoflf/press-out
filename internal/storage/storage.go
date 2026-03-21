@@ -8,12 +8,13 @@ import (
 
 // File name constants for lift artifacts.
 const (
-	FileOriginal  = "original.mp4"
-	FileTrimmed   = "trimmed.mp4"
-	FileCropped   = "cropped.mp4"
-	FileSkeleton  = "skeleton.mp4"
-	FileThumbnail = "thumbnail.jpg"
-	FileKeypoints = "keypoints.json"
+	FileOriginal   = "original.mp4"
+	FileTrimmed    = "trimmed.mp4"
+	FileCropped    = "cropped.mp4"
+	FileSkeleton   = "skeleton.mp4"
+	FileThumbnail  = "thumbnail.jpg"
+	FileKeypoints  = "keypoints.json"
+	FileCropParams = "crop-params.json"
 )
 
 // LiftDir returns the directory path for a given lift's files.
