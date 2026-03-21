@@ -1,0 +1,8 @@
+[project]
+name = "press-out-scripts"
+version = "0.1.0"
+requires-python = ">=3.10"
+dependencies = [
+    "ultralytics>=8.0",
+    "opencv-python-headless>=4.0",
+]

@@ -83,9 +83,17 @@ func main() {
 		}
 	}
 
+	// Derive project root (directory containing pyproject.toml / scripts/).
+	projectRoot, err := os.Getwd()
+	if err != nil {
+		slog.Error("failed to get working directory", "error", err)
+		os.Exit(1)
+	}
+
 	broker := sse.NewBroker()
 	pipelineStages := pipeline.DefaultStages()
-	pipelineStages[0] = &stages.TrimStage{} // Replace stub with real trim stage
+	pipelineStages[0] = &stages.TrimStage{}                          // Replace stub with real trim stage
+	pipelineStages[1] = &stages.PoseStage{ProjectRoot: projectRoot}  // Replace stub with real pose stage
 
 	pl := pipeline.New(pipelineStages, broker)
 

@@ -32,5 +32,11 @@ state.json
 # BMAD artifacts (not part of app)
 _bmad/
 
+# Python (uv venv)
+.venv/
+
+# YOLO model weights (auto-downloaded)
+*.pt
+
 # Beads
 .beads/

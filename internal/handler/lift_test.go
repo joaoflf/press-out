@@ -849,11 +849,12 @@ var sampleKeypointsJSON = []byte(`{
 	]
 }`)
 
-func TestHandleCreateLift_WithKeypoints(t *testing.T) {
+func TestHandleCreateLift_IgnoresKeypointsField(t *testing.T) {
 	srv := setupTestServer(t)
 	mux := http.NewServeMux()
 	srv.RegisterRoutes(mux)
 
+	// Include a keypoints field — handler should ignore it (pose is now server-side).
 	req := createMultipartRequestWithKeypoints(t, "test.mp4", "snatch", []byte("fake video"), sampleKeypointsJSON)
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
@@ -867,20 +868,16 @@ func TestHandleCreateLift_WithKeypoints(t *testing.T) {
 		t.Fatalf("expected 1 lift, got %d, err=%v", len(lifts), err)
 	}
 
-	// Verify video saved
+	// Verify video saved.
 	videoPath := storage.LiftFile(srv.DataDir, lifts[0].ID, storage.FileOriginal)
 	if _, err := os.Stat(videoPath); os.IsNotExist(err) {
 		t.Error("video file should be persisted")
 	}
 
-	// Verify keypoints.json saved
+	// Verify keypoints.json is NOT saved (handler no longer reads this field).
 	kpPath := storage.LiftFile(srv.DataDir, lifts[0].ID, storage.FileKeypoints)
-	data, err := os.ReadFile(kpPath)
-	if err != nil {
-		t.Fatalf("keypoints.json not written: %v", err)
-	}
-	if len(data) == 0 {
-		t.Error("keypoints.json should not be empty")
+	if _, err := os.Stat(kpPath); !os.IsNotExist(err) {
+		t.Error("keypoints.json should NOT be saved — pose estimation is now server-side")
 	}
 }
 
@@ -909,16 +906,17 @@ func TestHandleCreateLift_WithoutKeypoints(t *testing.T) {
 	}
 }
 
-func TestHandleCreateLift_InvalidKeypoints(t *testing.T) {
+func TestHandleCreateLift_ExtraFieldsIgnored(t *testing.T) {
 	srv := setupTestServer(t)
 	mux := http.NewServeMux()
 	srv.RegisterRoutes(mux)
 
+	// Include arbitrary extra data in the keypoints field — handler should ignore it.
 	req := createMultipartRequestWithKeypoints(t, "test.mp4", "snatch", []byte("fake video"), []byte("not json"))
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 
-	// Upload should still succeed (graceful degradation)
+	// Upload should succeed (extra fields are ignored).
 	if w.Code != http.StatusSeeOther {
 		t.Fatalf("expected 303, got %d: %s", w.Code, w.Body.String())
 	}
@@ -928,32 +926,10 @@ func TestHandleCreateLift_InvalidKeypoints(t *testing.T) {
 		t.Fatalf("expected 1 lift, got %d", len(lifts))
 	}
 
-	// keypoints.json should NOT be saved (invalid JSON was discarded)
+	// keypoints.json should NOT exist (handler no longer reads this field).
 	kpPath := storage.LiftFile(srv.DataDir, lifts[0].ID, storage.FileKeypoints)
 	if _, err := os.Stat(kpPath); !os.IsNotExist(err) {
-		t.Error("invalid keypoints should not be persisted")
-	}
-}
-
-func TestHandleCreateLift_EmptyKeypoints(t *testing.T) {
-	srv := setupTestServer(t)
-	mux := http.NewServeMux()
-	srv.RegisterRoutes(mux)
-
-	// Valid JSON but missing required fields
-	emptyKp := []byte(`{"sourceWidth": 0, "sourceHeight": 0, "frames": []}`)
-	req := createMultipartRequestWithKeypoints(t, "test.mp4", "clean", []byte("fake video"), emptyKp)
-	w := httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
-
-	if w.Code != http.StatusSeeOther {
-		t.Fatalf("expected 303, got %d: %s", w.Code, w.Body.String())
-	}
-
-	lifts, _ := srv.Queries.ListLifts(context.Background())
-	kpPath := storage.LiftFile(srv.DataDir, lifts[0].ID, storage.FileKeypoints)
-	if _, err := os.Stat(kpPath); !os.IsNotExist(err) {
-		t.Error("keypoints with missing required fields should not be persisted")
+		t.Error("keypoints.json should not exist — pose estimation is now server-side")
 	}
 }
 

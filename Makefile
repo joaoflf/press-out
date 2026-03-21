@@ -1,6 +1,6 @@
 TAILWINDCSS ?= npx tailwindcss
 
-.PHONY: build sqlc-generate tailwind-build go-build test run dev setup check-deps
+.PHONY: build sqlc-generate tailwind-build go-build test run dev setup check-deps uv-sync
 
 build: sqlc-generate tailwind-build go-build
 
@@ -31,3 +31,8 @@ check-deps:
 	@which ffprobe > /dev/null 2>&1 && echo "  ffprobe: $$(ffprobe -version 2>&1 | head -1)" || echo "  ffprobe: NOT FOUND (required for video analysis)"
 	@which sqlc > /dev/null 2>&1 && echo "  sqlc: $$(sqlc version 2>&1)" || echo "  sqlc: NOT FOUND"
 	@which go > /dev/null 2>&1 && echo "  go: $$(go version 2>&1)" || echo "  go: NOT FOUND"
+	@which uv > /dev/null 2>&1 && echo "  uv: $$(uv --version 2>&1)" || echo "  uv: NOT FOUND (required for pose estimation)"
+	@which python3 > /dev/null 2>&1 && echo "  python3: $$(python3 --version 2>&1)" || echo "  python3: NOT FOUND (required for pose estimation)"
+
+uv-sync:
+	uv sync
