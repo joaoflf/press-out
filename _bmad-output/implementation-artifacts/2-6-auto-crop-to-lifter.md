@@ -24,8 +24,10 @@ so that I see only my lift without distracting bystanders or background.
   - [ ] `Run(ctx context.Context, input StageInput) (StageOutput, error)` implementation
 
 - [ ] Implement bounding box computation from keypoints.json (AC: 1)
-  - [ ] Read `keypoints.json` from the lift directory (written by pose estimation stage — always contains a single person, selected by the pose stage)
-  - [ ] Use the per-frame `boundingBox` fields to compute a single enclosing box across all frames — find min `left`/`top` and max `right`/`bottom` across all frames. This is simpler and more accurate than deriving from individual keypoints.
+  - [ ] Read `keypoints.json` from the lift directory and deserialize into `pose.Result` (from `internal/pose/pose.go`) via `json.Unmarshal`. The file always contains a single person's data (person selection handled upstream by pose stage).
+  - [ ] Use the per-frame `pose.Frame.BoundingBox` fields to compute a single enclosing box across all frames — find min `Left`/`Top` and max `Right`/`Bottom` across all frames. Skip frames where bounding box area is zero (detection failed on that frame).
+  - [ ] **Denormalize coordinates:** BoundingBox values are normalized (0-1). Multiply by source video dimensions to get pixel coordinates before computing the crop rectangle.
+  - [ ] Get source video dimensions via `ffmpeg.GetDimensions(ctx, input.VideoPath)` (returns `width, height int, err error`) — this convenience function already exists at `internal/ffmpeg/ffmpeg.go:124`.
   - [ ] Define named constants for tuning:
     - [ ] `cropAspectW = 9` — crop aspect ratio width component
     - [ ] `cropAspectH = 16` — crop aspect ratio height component
@@ -33,10 +35,20 @@ so that I see only my lift without distracting bystanders or background.
   - [ ] Expand the bounding box by `cropPaddingPercent` on each side
   - [ ] Enforce 9:16 aspect ratio: expand the smaller dimension to match the ratio, keeping the bounding box centered
   - [ ] Clamp the crop rectangle to the source video dimensions (never exceed frame bounds)
-  - [ ] Get source video dimensions via `ffprobe` (use `ffmpeg.RunProbe()`) — needed for clamping and for crop-params.json
 
 - [ ] Write crop parameters file (AC: 1)
-  - [ ] Save `crop-params.json` to lift directory: `{"x": int, "y": int, "w": int, "h": int, "sourceWidth": int, "sourceHeight": int}`
+  - [ ] Define a `cropParams` struct in `crop.go` (unexported — skeleton stage defines its own for reading):
+    ```go
+    type cropParams struct {
+        X            int `json:"x"`
+        Y            int `json:"y"`
+        W            int `json:"w"`
+        H            int `json:"h"`
+        SourceWidth  int `json:"sourceWidth"`
+        SourceHeight int `json:"sourceHeight"`
+    }
+    ```
+  - [ ] Marshal and save as `crop-params.json` to lift directory
   - [ ] Output path: `storage.LiftFile(input.DataDir, input.LiftID, storage.FileCropParams)`
   - [ ] This file is read by the skeleton rendering stage (Story 3.1) for keypoint coordinate transformation
 
@@ -60,13 +72,11 @@ so that I see only my lift without distracting bystanders or background.
   - [ ] Output path: `storage.LiftFile(input.DataDir, input.LiftID, storage.FileThumbnail)`
   - [ ] Thumbnail extraction failure should NOT fail the stage — log warning, continue without thumbnail
 
-- [ ] Add storage constants (AC: 1, 2)
-  - [ ] Add `FileCropped = "cropped.mp4"` to `internal/storage/storage.go` constants (if not already defined)
-  - [ ] Add `FileThumbnail = "thumbnail.jpg"` to storage constants
-  - [ ] Add `FileCropParams = "crop-params.json"` to storage constants
+- [ ] Add storage constant (AC: 1)
+  - [ ] Add `FileCropParams = "crop-params.json"` to `internal/storage/storage.go` constants (`FileCropped` and `FileThumbnail` already exist)
 
 - [ ] Register crop stage with pipeline (AC: 1)
-  - [ ] In `main.go`, add `&stages.CropStage{}` as the third stage in the pipeline's stage slice (after PoseStage and TrimStage)
+  - [ ] In `main.go`, replace the stub at index 2: `pipelineStages[2] = &stages.CropStage{}` — `DefaultStages()[2]` is the `StageCropping` stub
 
 - [ ] Write unit tests `internal/pipeline/stages/crop_test.go` (AC: 1, 2, 3)
   - [ ] Test `CropStage.Name()` returns exactly `"Cropping"` (must match `StageCropping` constant from Story 2.1)
@@ -87,20 +97,31 @@ so that I see only my lift without distracting bystanders or background.
 
 ## Dev Notes
 
-- **Person selection is handled upstream by Story 2.4 (pose estimation).** YOLO26n-Pose selects the first (highest-confidence) person detected. The keypoints.json always contains a single person's data. The crop stage does not need multi-person logic — it computes the bounding box from the single person's keypoints directly.
+- **No multi-person logic needed.** The epics mention FR5 (identify lifter among multiple people), but person selection is handled upstream by Story 2.4 (pose estimation). YOLO26n-Pose selects the highest-confidence person. keypoints.json always contains a single person's data. The crop stage simply computes the enclosing bounding box from that one person.
+- **Bounding box values are normalized (0-1).** `pose.BoundingBox` fields (`Left`, `Top`, `Right`, `Bottom`) are `float64` in 0-1 range. Multiply by source pixel dimensions (from `ffmpeg.GetDimensions()`) to get pixel coordinates before any crop computation.
+- **Deserialize keypoints.json into `pose.Result`** (defined in `internal/pose/pose.go`). Use `os.ReadFile` + `json.Unmarshal` into `pose.Result`. Access per-frame bounding boxes via `result.Frames[i].BoundingBox`.
 - The crop stage receives `StageInput.VideoPath` from the trim stage (trimmed.mp4 if trim succeeded, otherwise the original video passed through). It also needs to read `keypoints.json` from the lift directory — this is NOT passed via StageInput but read directly from the filesystem using `storage.LiftFile(input.DataDir, input.LiftID, storage.FileKeypoints)`.
-- The keypoints.json includes per-frame `boundingBox` data from server-side YOLO26n-Pose detection. The crop stage uses these bounding boxes (not individual keypoints) to determine the crop region — compute the enclosing box across all frames, add padding, enforce 9:16. The skeleton stage (Story 3.1) is responsible for transforming keypoint coordinates to cropped-frame coordinates using crop-params.json.
+- **Skip frames with zero-area bounding boxes** when computing the enclosing box (detection may fail on some frames).
 - For the 9:16 aspect ratio enforcement: compute the bounding box from keypoints, add padding, then adjust to 9:16. If the box is too wide for 9:16, increase height. If too tall, increase width. Center the adjustment around the bounding box center.
 - Thumbnail timing: extract at the midpoint of the video duration, which for a trimmed video should capture the lift itself. Use `ffmpeg.GetDuration()` to get the video length.
 - crop-params.json is a lightweight metadata file that bridges the crop and skeleton stages. If no crop was applied (full frame preserved), this file is NOT written — the skeleton stage checks for its presence and skips coordinate transformation if absent.
 - The `cropPaddingPercent = 0.15` means 15% of the bounding box width/height is added on each side. For a bounding box that's 600px wide, this adds 90px on each side (780px total before aspect ratio enforcement).
-- Source video dimensions are needed for two purposes: (1) clamping the crop rectangle to frame bounds, and (2) writing to crop-params.json for downstream coordinate transformation. Use `ffprobe` (via `ffmpeg.RunProbe()`) to get dimensions.
+- **Source video dimensions:** Use `ffmpeg.GetDimensions(ctx, videoPath)` (returns `width, height int, err error`). Needed for: (1) denormalizing bounding box coordinates, (2) clamping the crop rectangle to frame bounds, and (3) writing to crop-params.json.
+
+### Existing Stage Patterns to Follow
+
+Follow the exact patterns from `internal/pipeline/stages/pose.go` and `trim.go`:
+- Logger setup: `logger := slog.With("lift_id", input.LiftID, "stage", pipeline.StageCropping)`
+- Timing: `start := time.Now()` at top, `time.Since(start).Milliseconds()` in log calls
+- Error wrapping: `fmt.Errorf("crop: <context>: %w", err)`
+- Return on success: `pipeline.StageOutput{VideoPath: outputPath}`
+- Return on graceful degradation: `pipeline.StageOutput{VideoPath: input.VideoPath}, nil`
 
 ### Architecture Compliance
 
 - Implements `pipeline.Stage` interface: `Name() string` + `Run(ctx, StageInput) (StageOutput, error)`
 - Uses `storage.LiftFile()` for all output paths
-- Uses `ffmpeg.CropVideo()` and `ffmpeg.ExtractThumbnail()` — never calls `exec.Command` directly
+- Uses `ffmpeg.CropVideo()`, `ffmpeg.ExtractThumbnail()`, `ffmpeg.GetDimensions()`, and `ffmpeg.GetDuration()` — never calls `exec.Command` directly
 - Returns errors on failure, never panics
 - Logs with `slog` using standard attributes: `lift_id`, `stage`, `duration_ms`, `error`
 - Graceful degradation: missing keypoints preserves full frame, thumbnail failure doesn't fail stage
@@ -112,8 +133,8 @@ New files to create:
 - `internal/pipeline/stages/crop_test.go` — tests
 
 Files to modify:
-- `cmd/press-out/main.go` — register CropStage in pipeline stages list (after PoseStage)
-- `internal/storage/storage.go` — add `FileCropped`, `FileThumbnail`, `FileCropParams` constants
+- `cmd/press-out/main.go` — replace stub at index 2 with `&stages.CropStage{}`
+- `internal/storage/storage.go` — add `FileCropParams` constant only (`FileCropped` and `FileThumbnail` already exist)
 
 ### References
 
