@@ -301,6 +301,36 @@ func (s *Server) HandleLiftEvents(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// HandleReprocess handles POST /lifts/{id}/reprocess — re-triggers the pipeline.
+func (s *Server) HandleReprocess(w http.ResponseWriter, r *http.Request) {
+	idStr := r.PathValue("id")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		http.Error(w, "Not Found", http.StatusNotFound)
+		return
+	}
+
+	if _, err := s.Queries.GetLift(r.Context(), id); err != nil {
+		http.Error(w, "Not Found", http.StatusNotFound)
+		return
+	}
+
+	if s.Broker != nil && s.Broker.IsProcessing(id) {
+		http.Error(w, "Pipeline already running", http.StatusConflict)
+		return
+	}
+
+	if s.Pipeline == nil {
+		http.Error(w, "Pipeline not configured", http.StatusInternalServerError)
+		return
+	}
+
+	go s.Pipeline.Run(context.Background(), id, s.DataDir)
+
+	slog.Info("pipeline re-triggered", "lift_id", id)
+	w.WriteHeader(http.StatusOK)
+}
+
 // HandleLiftCoaching handles GET /lifts/{id}/coaching (stub for later stories).
 func (s *Server) HandleLiftCoaching(w http.ResponseWriter, r *http.Request) {
 	http.Error(w, "Not Implemented", http.StatusNotImplemented)

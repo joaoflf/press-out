@@ -27,6 +27,7 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /lifts", s.HandleCreateLift)
 	mux.HandleFunc("GET /lifts/{id}", s.HandleGetLift)
 	mux.HandleFunc("DELETE /lifts/{id}", s.HandleDeleteLift)
+	mux.HandleFunc("POST /lifts/{id}/reprocess", s.HandleReprocess)
 
 	// SSE
 	mux.HandleFunc("GET /lifts/{id}/events", s.HandleLiftEvents)

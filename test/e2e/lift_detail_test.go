@@ -348,6 +348,37 @@ func TestLiftDetail_VideoHeightConstrained(t *testing.T) {
 	}
 }
 
+func TestLiftDetail_ReprocessButtonVisible(t *testing.T) {
+	env := startTestEnv(t)
+	liftID := createTestLift(t, env, "snatch", "2026-01-01T00:00:00Z")
+
+	ctx, _ := newBrowserCtx(t)
+
+	var btnExists bool
+	var btnText string
+	err := chromedp.Run(ctx,
+		chromedp.Navigate(fmt.Sprintf("%s/lifts/%d", env.BaseURL, liftID)),
+		chromedp.WaitReady("body"),
+		chromedp.Evaluate(`document.querySelector('button[aria-label="Re-process lift"]') !== null`, &btnExists),
+	)
+	if err != nil {
+		t.Fatalf("chromedp: %v", err)
+	}
+	if !btnExists {
+		t.Fatal("re-process button not found when pipeline is not running")
+	}
+
+	err = chromedp.Run(ctx,
+		chromedp.Text(`button[aria-label="Re-process lift"]`, &btnText),
+	)
+	if err != nil {
+		t.Fatalf("chromedp text: %v", err)
+	}
+	if btnText != "Re-process" {
+		t.Errorf("button text=%q, want %q", btnText, "Re-process")
+	}
+}
+
 func TestLiftDetail_CSSAndScriptsLoad(t *testing.T) {
 	env := startTestEnv(t)
 	liftID := createTestLift(t, env, "snatch", "2026-01-01T00:00:00Z")

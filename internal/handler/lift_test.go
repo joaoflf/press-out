@@ -14,6 +14,8 @@ import (
 	"testing"
 
 	_ "github.com/mattn/go-sqlite3"
+	"press-out/internal/pipeline"
+	"press-out/internal/sse"
 	"press-out/internal/storage"
 	"press-out/internal/storage/sqlc"
 )
@@ -930,6 +932,109 @@ func TestHandleCreateLift_ExtraFieldsIgnored(t *testing.T) {
 	kpPath := storage.LiftFile(srv.DataDir, lifts[0].ID, storage.FileKeypoints)
 	if _, err := os.Stat(kpPath); !os.IsNotExist(err) {
 		t.Error("keypoints.json should not exist — pose estimation is now server-side")
+	}
+}
+
+// --- Story 2.7: Reprocess tests ---
+
+func TestHandleReprocess_ValidLift(t *testing.T) {
+	srv := setupTestServer(t)
+
+	lift, err := srv.Queries.CreateLift(context.Background(), sqlc.CreateLiftParams{
+		LiftType:  "snatch",
+		CreatedAt: "2026-01-01T00:00:00Z",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Create original video file (required for pipeline)
+	if err := storage.CreateLiftDir(srv.DataDir, lift.ID); err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile(storage.LiftFile(srv.DataDir, lift.ID, storage.FileOriginal), []byte("video"), 0644)
+
+	broker := sse.NewBroker()
+	srv.Broker = broker
+	srv.Pipeline = pipeline.New(nil, broker) // no stages — Run returns quickly
+
+	mux := http.NewServeMux()
+	srv.RegisterRoutes(mux)
+
+	req := httptest.NewRequest("POST", fmt.Sprintf("/lifts/%d/reprocess", lift.ID), nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestHandleReprocess_NonExistentLift(t *testing.T) {
+	srv := setupTestServer(t)
+
+	broker := sse.NewBroker()
+	srv.Broker = broker
+	srv.Pipeline = pipeline.New(nil, broker)
+
+	mux := http.NewServeMux()
+	srv.RegisterRoutes(mux)
+
+	req := httptest.NewRequest("POST", "/lifts/999/reprocess", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("expected 404, got %d", w.Code)
+	}
+}
+
+func TestHandleReprocess_AlreadyProcessing(t *testing.T) {
+	srv := setupTestServer(t)
+
+	lift, err := srv.Queries.CreateLift(context.Background(), sqlc.CreateLiftParams{
+		LiftType:  "snatch",
+		CreatedAt: "2026-01-01T00:00:00Z",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	broker := sse.NewBroker()
+	broker.StartProcessing(lift.ID) // simulate running pipeline
+	srv.Broker = broker
+	srv.Pipeline = pipeline.New(nil, broker)
+
+	mux := http.NewServeMux()
+	srv.RegisterRoutes(mux)
+
+	req := httptest.NewRequest("POST", fmt.Sprintf("/lifts/%d/reprocess", lift.ID), nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusConflict {
+		t.Errorf("expected 409, got %d", w.Code)
+	}
+
+	broker.StopProcessing(lift.ID) // cleanup
+}
+
+func TestHandleReprocess_InvalidID(t *testing.T) {
+	srv := setupTestServer(t)
+
+	broker := sse.NewBroker()
+	srv.Broker = broker
+	srv.Pipeline = pipeline.New(nil, broker)
+
+	mux := http.NewServeMux()
+	srv.RegisterRoutes(mux)
+
+	req := httptest.NewRequest("POST", "/lifts/abc/reprocess", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("expected 404, got %d", w.Code)
 	}
 }
 
