@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"math"
 	"os"
+	"sort"
 	"time"
 
 	"press-out/internal/ffmpeg"
@@ -140,14 +141,36 @@ func extractThumbnail(ctx context.Context, logger *slog.Logger, dataDir string, 
 	}
 }
 
+// median returns the median value of a float64 slice.
+// It sorts a copy of the input so the original is not modified.
+func median(values []float64) float64 {
+	if len(values) == 0 {
+		return 0
+	}
+	sorted := make([]float64, len(values))
+	copy(sorted, values)
+	sort.Float64s(sorted)
+	n := len(sorted)
+	if n%2 == 1 {
+		return sorted[n/2]
+	}
+	return (sorted[n/2-1] + sorted[n/2]) / 2
+}
+
 // computeCropRegion computes the crop rectangle from per-frame bounding boxes.
 // It finds the enclosing box, adds padding, enforces 9:16 aspect ratio, and clamps to frame bounds.
+// The crop dimensions are derived from the union bounding box (to ensure no frame clips the lifter),
+// but the crop position is centered on the median per-frame bounding box center (robust to outliers).
 func computeCropRegion(frames []pose.Frame, sourceW, sourceH int) (x, y, w, h int) {
 	// Find the enclosing bounding box across all frames (normalized 0-1 coords).
 	minLeft := math.MaxFloat64
 	minTop := math.MaxFloat64
 	maxRight := -math.MaxFloat64
 	maxBottom := -math.MaxFloat64
+
+	// Collect per-frame bounding box centers for median computation.
+	centersX := make([]float64, 0, len(frames))
+	centersY := make([]float64, 0, len(frames))
 
 	for _, f := range frames {
 		bb := f.BoundingBox
@@ -163,6 +186,8 @@ func computeCropRegion(frames []pose.Frame, sourceW, sourceH int) (x, y, w, h in
 		if bb.Bottom > maxBottom {
 			maxBottom = bb.Bottom
 		}
+		centersX = append(centersX, (bb.Left+bb.Right)/2)
+		centersY = append(centersY, (bb.Top+bb.Bottom)/2)
 	}
 
 	// Convert normalized coordinates to pixel coordinates.
@@ -193,8 +218,9 @@ func computeCropRegion(frames []pose.Frame, sourceW, sourceH int) (x, y, w, h in
 	targetRatio := float64(cropAspectW) / float64(cropAspectH)
 	currentRatio := boxW / boxH
 
-	centerX := (pxLeft + pxRight) / 2
-	centerY := (pxTop + pxBottom) / 2
+	// Center on median per-frame bounding box center (robust to outlier frames).
+	centerX := median(centersX) * sw
+	centerY := median(centersY) * sh
 
 	if currentRatio > targetRatio {
 		// Too wide — increase height.
@@ -204,7 +230,7 @@ func computeCropRegion(frames []pose.Frame, sourceW, sourceH int) (x, y, w, h in
 		boxW = boxH * targetRatio
 	}
 
-	// Re-center the box.
+	// Re-center the box on the median center.
 	pxLeft = centerX - boxW/2
 	pxTop = centerY - boxH/2
 

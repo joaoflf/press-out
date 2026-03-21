@@ -411,6 +411,109 @@ func TestComputeCropRegion_EdgeClamp(t *testing.T) {
 	}
 }
 
+func TestMedian(t *testing.T) {
+	tests := []struct {
+		name   string
+		values []float64
+		want   float64
+	}{
+		{"single value", []float64{5.0}, 5.0},
+		{"odd count", []float64{3.0, 1.0, 2.0}, 2.0},
+		{"even count", []float64{4.0, 1.0, 3.0, 2.0}, 2.5},
+		{"empty", []float64{}, 0},
+		{"with outlier", []float64{0.5, 0.5, 0.5, 0.5, 10.0}, 0.5},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := median(tt.values)
+			if math.Abs(got-tt.want) > 1e-9 {
+				t.Errorf("median(%v) = %f, want %f", tt.values, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestComputeCropRegion_MedianCenter(t *testing.T) {
+	// Construct frames where one outlier frame shifts the union center significantly.
+	// 4 frames with the lifter centered at x=0.5, 1 outlier frame at x=0.9.
+	// Union center would be at (0.4+0.95)/2 = 0.675, but median center should be ~0.5.
+	frames := []pose.Frame{
+		{BoundingBox: pose.BoundingBox{Left: 0.4, Top: 0.2, Right: 0.6, Bottom: 0.8}},
+		{BoundingBox: pose.BoundingBox{Left: 0.4, Top: 0.2, Right: 0.6, Bottom: 0.8}},
+		{BoundingBox: pose.BoundingBox{Left: 0.4, Top: 0.2, Right: 0.6, Bottom: 0.8}},
+		{BoundingBox: pose.BoundingBox{Left: 0.4, Top: 0.2, Right: 0.6, Bottom: 0.8}},
+		// Outlier frame: lifter far right
+		{BoundingBox: pose.BoundingBox{Left: 0.8, Top: 0.2, Right: 0.95, Bottom: 0.8}},
+	}
+
+	sourceW, sourceH := 1080, 1920
+	x, y, w, h := computeCropRegion(frames, sourceW, sourceH)
+
+	// The median horizontal center is 0.5 (from the 4 consistent frames).
+	// The crop should be centered near x=540 (0.5 * 1080), not at ~729 (union center).
+	cropCenterX := float64(x) + float64(w)/2
+	medianExpected := 0.5 * float64(sourceW) // 540
+	unionExpected := (0.4 + 0.95) / 2 * float64(sourceW)
+
+	// Crop center should be closer to median than to union center.
+	distToMedian := math.Abs(cropCenterX - medianExpected)
+	distToUnion := math.Abs(cropCenterX - unionExpected)
+	if distToMedian >= distToUnion {
+		t.Errorf("crop center X=%.1f is closer to union center (%.1f) than median center (%.1f)",
+			cropCenterX, unionExpected, medianExpected)
+	}
+
+	// Verify 9:16 aspect ratio.
+	expectedRatio := 9.0 / 16.0
+	actualRatio := float64(w) / float64(h)
+	if math.Abs(actualRatio-expectedRatio) > 0.02 {
+		t.Errorf("aspect ratio = %.4f, want %.4f (±0.02)", actualRatio, expectedRatio)
+	}
+
+	// Verify within frame bounds.
+	if x < 0 || y < 0 || x+w > sourceW || y+h > sourceH {
+		t.Errorf("crop out of bounds: x=%d y=%d w=%d h=%d (source %dx%d)", x, y, w, h, sourceW, sourceH)
+	}
+
+	t.Logf("crop region: x=%d y=%d w=%d h=%d (center=%.1f, median=%.1f, union=%.1f)",
+		x, y, w, h, cropCenterX, medianExpected, unionExpected)
+}
+
+func TestComputeCropRegion_SymmetricFrames(t *testing.T) {
+	// When all frames are symmetric (same bounding box), median and union center coincide.
+	frames := []pose.Frame{
+		{BoundingBox: pose.BoundingBox{Left: 0.3, Top: 0.2, Right: 0.7, Bottom: 0.8}},
+		{BoundingBox: pose.BoundingBox{Left: 0.3, Top: 0.2, Right: 0.7, Bottom: 0.8}},
+		{BoundingBox: pose.BoundingBox{Left: 0.3, Top: 0.2, Right: 0.7, Bottom: 0.8}},
+	}
+
+	sourceW, sourceH := 1080, 1920
+	x, y, w, h := computeCropRegion(frames, sourceW, sourceH)
+
+	// Center should be at (0.5*1080, 0.5*1920) = (540, 960).
+	cropCenterX := float64(x) + float64(w)/2
+	cropCenterY := float64(y) + float64(h)/2
+	expectedCX := 0.5 * float64(sourceW)
+	expectedCY := 0.5 * float64(sourceH)
+
+	if math.Abs(cropCenterX-expectedCX) > 2 {
+		t.Errorf("crop center X=%.1f, want ~%.1f", cropCenterX, expectedCX)
+	}
+	if math.Abs(cropCenterY-expectedCY) > 2 {
+		t.Errorf("crop center Y=%.1f, want ~%.1f", cropCenterY, expectedCY)
+	}
+
+	// Verify even dimensions and 9:16 ratio.
+	if w%2 != 0 || h%2 != 0 {
+		t.Errorf("dimensions not even: w=%d h=%d", w, h)
+	}
+	expectedRatio := 9.0 / 16.0
+	actualRatio := float64(w) / float64(h)
+	if math.Abs(actualRatio-expectedRatio) > 0.02 {
+		t.Errorf("aspect ratio = %.4f, want %.4f", actualRatio, expectedRatio)
+	}
+}
+
 func TestComputeCropRegion_FullFrame(t *testing.T) {
 	// Bounding box covers entire frame — crop should be the full frame.
 	frames := []pose.Frame{
