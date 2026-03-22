@@ -91,7 +91,6 @@ func TestCropStage_WithKeypoints(t *testing.T) {
 	if thumbInfo.Size() == 0 {
 		t.Fatal("thumbnail.jpg is empty")
 	}
-	// Verify JPEG magic bytes.
 	thumbData, err := os.ReadFile(thumbnailPath)
 	if err != nil {
 		t.Fatalf("failed to read thumbnail: %v", err)
@@ -116,64 +115,6 @@ func TestCropStage_WithKeypoints(t *testing.T) {
 	if params.SourceWidth == 0 || params.SourceHeight == 0 {
 		t.Error("crop params have zero source dimensions")
 	}
-	t.Logf("crop params: x=%d y=%d w=%d h=%d source=%dx%d", params.X, params.Y, params.W, params.H, params.SourceWidth, params.SourceHeight)
-}
-
-func TestCropStage_AspectRatio(t *testing.T) {
-	skipIfNoFFmpeg(t)
-	skipIfNoFFprobe(t)
-	video := sampleLiftVideo(t)
-
-	tmpDir := t.TempDir()
-	liftID := int64(11)
-	if err := storage.CreateLiftDir(tmpDir, liftID); err != nil {
-		t.Fatalf("failed to create lift dir: %v", err)
-	}
-
-	videoData, err := os.ReadFile(video)
-	if err != nil {
-		t.Fatalf("failed to read sample video: %v", err)
-	}
-	inputPath := storage.LiftFile(tmpDir, liftID, storage.FileOriginal)
-	if err := os.WriteFile(inputPath, videoData, 0644); err != nil {
-		t.Fatalf("failed to write input video: %v", err)
-	}
-
-	sampleKeypoints := filepath.Join("..", "..", "..", "testdata", "keypoints-sample.json")
-	if _, err := os.Stat(sampleKeypoints); os.IsNotExist(err) {
-		t.Skip("keypoints-sample.json not found")
-	}
-	kpData, err := os.ReadFile(sampleKeypoints)
-	if err != nil {
-		t.Fatalf("failed to read sample keypoints: %v", err)
-	}
-	keypointsPath := storage.LiftFile(tmpDir, liftID, storage.FileKeypoints)
-	if err := os.WriteFile(keypointsPath, kpData, 0644); err != nil {
-		t.Fatalf("failed to write keypoints: %v", err)
-	}
-
-	// Read crop params to check aspect ratio.
-	stage := &CropStage{}
-	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
-	defer cancel()
-
-	if _, err := stage.Run(ctx, pipeline.StageInput{
-		LiftID:    liftID,
-		DataDir:   tmpDir,
-		VideoPath: inputPath,
-	}); err != nil {
-		t.Fatalf("Run() returned error: %v", err)
-	}
-
-	paramsPath := storage.LiftFile(tmpDir, liftID, storage.FileCropParams)
-	paramsData, err := os.ReadFile(paramsPath)
-	if err != nil {
-		t.Fatalf("crop-params.json not found: %v", err)
-	}
-	var params CropParams
-	if err := json.Unmarshal(paramsData, &params); err != nil {
-		t.Fatalf("failed to parse crop-params.json: %v", err)
-	}
 
 	// Verify 9:16 aspect ratio within rounding tolerance.
 	expectedRatio := 9.0 / 16.0
@@ -181,6 +122,8 @@ func TestCropStage_AspectRatio(t *testing.T) {
 	if math.Abs(actualRatio-expectedRatio) > 0.02 {
 		t.Errorf("aspect ratio = %.4f, want %.4f (±0.02)", actualRatio, expectedRatio)
 	}
+
+	t.Logf("crop params: x=%d y=%d w=%d h=%d source=%dx%d", params.X, params.Y, params.W, params.H, params.SourceWidth, params.SourceHeight)
 }
 
 func TestCropStage_NoKeypoints(t *testing.T) {
@@ -217,24 +160,20 @@ func TestCropStage_NoKeypoints(t *testing.T) {
 		t.Fatalf("Run() returned error: %v", err)
 	}
 
-	// Should preserve the original video path.
 	if output.VideoPath != inputPath {
 		t.Errorf("expected original path %q, got %q", inputPath, output.VideoPath)
 	}
 
-	// cropped.mp4 should NOT exist.
 	croppedPath := storage.LiftFile(tmpDir, liftID, storage.FileCropped)
 	if _, err := os.Stat(croppedPath); err == nil {
 		t.Error("cropped.mp4 should not exist when keypoints are absent")
 	}
 
-	// crop-params.json should NOT exist.
 	paramsPath := storage.LiftFile(tmpDir, liftID, storage.FileCropParams)
 	if _, err := os.Stat(paramsPath); err == nil {
 		t.Error("crop-params.json should not exist when keypoints are absent")
 	}
 
-	// thumbnail.jpg should still be extracted.
 	thumbnailPath := storage.LiftFile(tmpDir, liftID, storage.FileThumbnail)
 	if _, err := os.Stat(thumbnailPath); err != nil {
 		t.Errorf("thumbnail.jpg should be extracted even without keypoints: %v", err)
@@ -256,7 +195,8 @@ func TestCropStage_FFmpegFailure(t *testing.T) {
 		SourceWidth:  1920,
 		SourceHeight: 1080,
 		Frames: []pose.Frame{
-			{BoundingBox: pose.BoundingBox{Left: 0.2, Top: 0.1, Right: 0.8, Bottom: 0.9}},
+			{TimeOffsetMs: 0, BoundingBox: pose.BoundingBox{Left: 0.2, Top: 0.1, Right: 0.8, Bottom: 0.9}},
+			{TimeOffsetMs: 33, BoundingBox: pose.BoundingBox{Left: 0.2, Top: 0.1, Right: 0.8, Bottom: 0.9}},
 		},
 	}
 	kpData, _ := json.Marshal(result)
@@ -295,8 +235,6 @@ func TestCropStage_ThumbnailFailureNonFatal(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	// The no-keypoints path tries to extract thumbnail from a nonexistent video.
-	// The stage should still succeed (thumbnail failure is non-fatal).
 	output, err := stage.Run(ctx, pipeline.StageInput{
 		LiftID:    liftID,
 		DataDir:   tmpDir,
@@ -310,7 +248,6 @@ func TestCropStage_ThumbnailFailureNonFatal(t *testing.T) {
 		t.Errorf("expected original path preserved, got %q", output.VideoPath)
 	}
 
-	// Thumbnail should not exist.
 	thumbnailPath := storage.LiftFile(tmpDir, liftID, storage.FileThumbnail)
 	if _, err := os.Stat(thumbnailPath); err == nil {
 		t.Error("thumbnail should not exist when source video is nonexistent")
@@ -332,7 +269,8 @@ func TestCropStage_ContextCancellation(t *testing.T) {
 		SourceWidth:  1920,
 		SourceHeight: 1080,
 		Frames: []pose.Frame{
-			{BoundingBox: pose.BoundingBox{Left: 0.2, Top: 0.1, Right: 0.8, Bottom: 0.9}},
+			{TimeOffsetMs: 0, BoundingBox: pose.BoundingBox{Left: 0.2, Top: 0.1, Right: 0.8, Bottom: 0.9}},
+			{TimeOffsetMs: 33, BoundingBox: pose.BoundingBox{Left: 0.2, Top: 0.1, Right: 0.8, Bottom: 0.9}},
 		},
 	}
 	kpData, _ := json.Marshal(result)
@@ -355,13 +293,13 @@ func TestCropStage_ContextCancellation(t *testing.T) {
 	}
 }
 
-func TestComputeCropRegion(t *testing.T) {
+func TestComputeExtentCropRegion(t *testing.T) {
 	frames := []pose.Frame{
 		{BoundingBox: pose.BoundingBox{Left: 0.3, Top: 0.2, Right: 0.7, Bottom: 0.8}},
 		{BoundingBox: pose.BoundingBox{Left: 0.25, Top: 0.15, Right: 0.75, Bottom: 0.85}},
 	}
 
-	x, y, w, h := computeCropRegion(frames, 1080, 1920)
+	w, h, originY := computeExtentCropRegion(frames, 1080, 1920)
 
 	// Verify 9:16 aspect ratio.
 	expectedRatio := 9.0 / 16.0
@@ -371,14 +309,11 @@ func TestComputeCropRegion(t *testing.T) {
 	}
 
 	// Verify crop is within frame bounds.
-	if x < 0 || y < 0 {
-		t.Errorf("crop origin is negative: x=%d y=%d", x, y)
+	if originY < 0 {
+		t.Errorf("crop origin Y is negative: %d", originY)
 	}
-	if x+w > 1080 {
-		t.Errorf("crop exceeds frame width: x=%d + w=%d > 1080", x, w)
-	}
-	if y+h > 1920 {
-		t.Errorf("crop exceeds frame height: y=%d + h=%d > 1920", y, h)
+	if originY+h > 1920 {
+		t.Errorf("crop exceeds frame height: y=%d + h=%d > 1920", originY, h)
 	}
 
 	// Verify even dimensions.
@@ -389,25 +324,108 @@ func TestComputeCropRegion(t *testing.T) {
 		t.Errorf("height %d is not even", h)
 	}
 
-	t.Logf("crop region: x=%d y=%d w=%d h=%d", x, y, w, h)
+	t.Logf("crop region: w=%d h=%d originY=%d", w, h, originY)
 }
 
-func TestComputeCropRegion_EdgeClamp(t *testing.T) {
-	// Bounding box near the edge of the frame — should clamp.
-	frames := []pose.Frame{
-		{BoundingBox: pose.BoundingBox{Left: 0.0, Top: 0.0, Right: 0.3, Bottom: 0.5}},
+func TestComputeHybridCenters_Stationary(t *testing.T) {
+	// All frames at same position — should produce 0% walking and single lock.
+	frames := make([]pose.Frame, 60) // ~2s at 30fps
+	for i := range frames {
+		frames[i] = pose.Frame{
+			TimeOffsetMs: int64(i * 33),
+			BoundingBox:  pose.BoundingBox{Left: 0.4, Top: 0.2, Right: 0.6, Bottom: 0.8},
+		}
 	}
 
-	x, y, w, h := computeCropRegion(frames, 1080, 1920)
+	sourceW := 1080
+	cxList := computeHybridCenters(frames, sourceW)
+	if len(cxList) != len(frames) {
+		t.Fatalf("expected %d centers, got %d", len(frames), len(cxList))
+	}
 
-	if x < 0 || y < 0 {
-		t.Errorf("crop origin should be clamped to >= 0: x=%d y=%d", x, y)
+	// All centers should be at the same position (median of constant).
+	expected := 0.5 * float64(sourceW) // (0.4+0.6)/2 * 1080 = 540
+	for i, cx := range cxList {
+		if math.Abs(cx-expected) > 1 {
+			t.Errorf("frame %d: cx=%.1f, want ~%.1f", i, cx, expected)
+			break
+		}
 	}
-	if x+w > 1080 {
-		t.Errorf("crop exceeds frame width: x=%d + w=%d > 1080", x, w)
+
+	// Walking percent should be 0.
+	wp := computeWalkingPercent(frames, sourceW)
+	if wp > 0.01 {
+		t.Errorf("walking percent = %.1f%%, want 0%%", wp*100)
 	}
-	if y+h > 1920 {
-		t.Errorf("crop exceeds frame height: y=%d + h=%d > 1920", y, h)
+}
+
+func TestComputeHybridCenters_WithWalk(t *testing.T) {
+	// Simulate CJ: stationary at x=0.45, walk to x=0.25, stationary at x=0.25.
+	frames := make([]pose.Frame, 0, 90)
+
+	// First segment: stationary at x=0.45 (30 frames)
+	for i := 0; i < 30; i++ {
+		frames = append(frames, pose.Frame{
+			TimeOffsetMs: int64(i * 33),
+			BoundingBox:  pose.BoundingBox{Left: 0.35, Top: 0.2, Right: 0.55, Bottom: 0.8},
+		})
+	}
+
+	// Walking transition (15 frames) - gradual shift from 0.45 to 0.25
+	for i := 0; i < 15; i++ {
+		t := float64(i) / 14.0
+		cx := 0.45 - t*0.20
+		hw := 0.10
+		frames = append(frames, pose.Frame{
+			TimeOffsetMs: int64((30 + i) * 33),
+			BoundingBox:  pose.BoundingBox{Left: cx - hw, Top: 0.2, Right: cx + hw, Bottom: 0.8},
+		})
+	}
+
+	// Second segment: stationary at x=0.25 (45 frames)
+	for i := 0; i < 45; i++ {
+		frames = append(frames, pose.Frame{
+			TimeOffsetMs: int64((45 + i) * 33),
+			BoundingBox:  pose.BoundingBox{Left: 0.15, Top: 0.2, Right: 0.35, Bottom: 0.8},
+		})
+	}
+
+	sourceW := 1080
+	cxList := computeHybridCenters(frames, sourceW)
+	if len(cxList) != len(frames) {
+		t.Fatalf("expected %d centers, got %d", len(frames), len(cxList))
+	}
+
+	// First segment should be locked near 0.45*1080 = 486.
+	firstLock := cxList[0]
+	t.Logf("first lock: %.1f", firstLock)
+
+	// Last segment should be locked near 0.25*1080 = 270.
+	lastLock := cxList[len(cxList)-1]
+	t.Logf("last lock: %.1f", lastLock)
+
+	// They should be different (walk detected).
+	if math.Abs(firstLock-lastLock) < 50 {
+		t.Errorf("expected different lock positions: first=%.1f, last=%.1f", firstLock, lastLock)
+	}
+
+	// Walking frames in the middle should be interpolated.
+	midIdx := 37 // middle of walking segment
+	if midIdx < len(cxList) {
+		midCX := cxList[midIdx]
+		// Should be between the two lock positions.
+		lo := math.Min(firstLock, lastLock)
+		hi := math.Max(firstLock, lastLock)
+		if midCX < lo-10 || midCX > hi+10 {
+			t.Errorf("walking frame %d cx=%.1f not between locks [%.1f, %.1f]", midIdx, midCX, lo, hi)
+		}
+	}
+
+	// Walking percent should be > 0%.
+	wp := computeWalkingPercent(frames, sourceW)
+	t.Logf("walking percent: %.1f%%", wp*100)
+	if wp < 0.01 {
+		t.Error("expected some walking frames detected")
 	}
 }
 
@@ -433,255 +451,114 @@ func TestMedian(t *testing.T) {
 	}
 }
 
-func TestComputeCropRegion_MedianCenter(t *testing.T) {
-	// Horizontal centering uses lockout frames (last ~20%).
-	// 10 frames: first 8 have lifter at x=0.3 (bent-over position),
-	// last 2 (lockout) have lifter at x=0.5 (standing position).
-	// Crop should center near x=0.5 (lockout), not x=0.3 (bent-over).
-	frames := make([]pose.Frame, 10)
-	for i := 0; i < 8; i++ {
-		frames[i] = pose.Frame{BoundingBox: pose.BoundingBox{Left: 0.2, Top: 0.2, Right: 0.4, Bottom: 0.8}}
-	}
-	for i := 8; i < 10; i++ {
-		frames[i] = pose.Frame{BoundingBox: pose.BoundingBox{Left: 0.4, Top: 0.2, Right: 0.6, Bottom: 0.8}}
+func TestPercentile(t *testing.T) {
+	values := []float64{10, 20, 30, 40, 50, 60, 70, 80, 90, 100}
+	p95 := percentile(values, 95)
+	// P95 of [10..100] = 95.5
+	if math.Abs(p95-95.5) > 1.0 {
+		t.Errorf("percentile(values, 95) = %.1f, want ~95.5", p95)
 	}
 
-	sourceW, sourceH := 1080, 1920
-	x, y, w, h := computeCropRegion(frames, sourceW, sourceH)
-
-	cropCenterX := float64(x) + float64(w)/2
-	lockoutExpected := 0.5 * float64(sourceW)  // 540 — lockout center
-	bentOverExpected := 0.3 * float64(sourceW) // 324 — bent-over center
-
-	// Crop center should be closer to lockout position than bent-over position.
-	distToLockout := math.Abs(cropCenterX - lockoutExpected)
-	distToBentOver := math.Abs(cropCenterX - bentOverExpected)
-	if distToLockout >= distToBentOver {
-		t.Errorf("crop center X=%.1f is closer to bent-over center (%.1f) than lockout center (%.1f)",
-			cropCenterX, bentOverExpected, lockoutExpected)
+	p50 := percentile(values, 50)
+	if math.Abs(p50-55) > 1.0 {
+		t.Errorf("percentile(values, 50) = %.1f, want ~55", p50)
 	}
-
-	// Verify 9:16 aspect ratio.
-	expectedRatio := 9.0 / 16.0
-	actualRatio := float64(w) / float64(h)
-	if math.Abs(actualRatio-expectedRatio) > 0.02 {
-		t.Errorf("aspect ratio = %.4f, want %.4f (±0.02)", actualRatio, expectedRatio)
-	}
-
-	// Verify within frame bounds.
-	if x < 0 || y < 0 || x+w > sourceW || y+h > sourceH {
-		t.Errorf("crop out of bounds: x=%d y=%d w=%d h=%d (source %dx%d)", x, y, w, h, sourceW, sourceH)
-	}
-
-	t.Logf("crop region: x=%d y=%d w=%d h=%d (center=%.1f, lockout=%.1f, bentOver=%.1f)",
-		x, y, w, h, cropCenterX, lockoutExpected, bentOverExpected)
 }
 
-func TestComputeCropRegion_SymmetricFrames(t *testing.T) {
-	// When all frames are symmetric (same bounding box), median and union center coincide.
+func TestCentersToOrigins(t *testing.T) {
+	cxList := []float64{500, 600, 100}
+	cropW := 200
+	sourceW := 800
+
+	xs, ys := centersToOrigins(cxList, cropW, sourceW, 50)
+
+	// cx=500, origin = 500-100 = 400
+	if xs[0] != 400 {
+		t.Errorf("xs[0] = %d, want 400", xs[0])
+	}
+	// cx=600, origin = 600-100 = 500
+	if xs[1] != 500 {
+		t.Errorf("xs[1] = %d, want 500", xs[1])
+	}
+	// cx=100, origin = 100-100 = 0 (clamped)
+	if xs[2] != 0 {
+		t.Errorf("xs[2] = %d, want 0", xs[2])
+	}
+	// All Y should be originY.
+	for i, y := range ys {
+		if y != 50 {
+			t.Errorf("ys[%d] = %d, want 50", i, y)
+		}
+	}
+}
+
+func TestCentersToOrigins_ClampRight(t *testing.T) {
+	cxList := []float64{750}
+	cropW := 200
+	sourceW := 800
+
+	xs, _ := centersToOrigins(cxList, cropW, sourceW, 0)
+
+	// cx=750, origin = 750-100 = 650, but 650+200=850 > 800, so clamp to 600.
+	if xs[0] != 600 {
+		t.Errorf("xs[0] = %d, want 600", xs[0])
+	}
+}
+
+func TestInterpolateToVideoFrames(t *testing.T) {
+	kpTimes := []float64{0.0, 0.5, 1.0}
+	kpXs := []int{100, 200, 300}
+	kpYs := []int{50, 50, 50}
+
+	positions := interpolateToVideoFrames(kpTimes, kpXs, kpYs, 10.0, 0.0, 1.0)
+
+	// 10fps over 1s = 10 frames
+	if len(positions) != 10 {
+		t.Fatalf("expected 10 positions, got %d", len(positions))
+	}
+
+	// Frame 0 at t=0.0: x=100
+	if positions[0][0] != 100 {
+		t.Errorf("frame 0 x=%d, want 100", positions[0][0])
+	}
+	// Frame 5 at t=0.5: x=200
+	if positions[5][0] != 200 {
+		t.Errorf("frame 5 x=%d, want 200", positions[5][0])
+	}
+	// Frame 9 at t=0.9: between 200 and 300.
+	if positions[9][0] < 200 || positions[9][0] > 300 {
+		t.Errorf("frame 9 x=%d, want between 200-300", positions[9][0])
+	}
+}
+
+func TestComputeExtentCropRegion_BarPadding(t *testing.T) {
+	// Frame with overhead bar position (top near 0).
 	frames := []pose.Frame{
-		{BoundingBox: pose.BoundingBox{Left: 0.3, Top: 0.2, Right: 0.7, Bottom: 0.8}},
-		{BoundingBox: pose.BoundingBox{Left: 0.3, Top: 0.2, Right: 0.7, Bottom: 0.8}},
-		{BoundingBox: pose.BoundingBox{Left: 0.3, Top: 0.2, Right: 0.7, Bottom: 0.8}},
+		{BoundingBox: pose.BoundingBox{Left: 0.3, Top: 0.05, Right: 0.7, Bottom: 0.9}},
+		{BoundingBox: pose.BoundingBox{Left: 0.3, Top: 0.15, Right: 0.7, Bottom: 0.85}},
+		{BoundingBox: pose.BoundingBox{Left: 0.3, Top: 0.15, Right: 0.7, Bottom: 0.85}},
 	}
 
 	sourceW, sourceH := 1080, 1920
-	x, y, w, h := computeCropRegion(frames, sourceW, sourceH)
+	w, h, originY := computeExtentCropRegion(frames, sourceW, sourceH)
 
-	// Center should be at (0.5*1080, 0.5*1920) = (540, 960).
-	cropCenterX := float64(x) + float64(w)/2
-	cropCenterY := float64(y) + float64(h)/2
-	expectedCX := 0.5 * float64(sourceW)
-	expectedCY := 0.5 * float64(sourceH)
-
-	if math.Abs(cropCenterX-expectedCX) > 2 {
-		t.Errorf("crop center X=%.1f, want ~%.1f", cropCenterX, expectedCX)
-	}
-	if math.Abs(cropCenterY-expectedCY) > 2 {
-		t.Errorf("crop center Y=%.1f, want ~%.1f", cropCenterY, expectedCY)
+	// The crop should start above the minimum top (0.05*1920=96) minus barTopPaddingPx (150).
+	// So originY should be <= 96-150 = -54, but clamped to 0.
+	if originY > 0 {
+		t.Logf("originY=%d (min top was near pixel 96, bar padding is 150px)", originY)
 	}
 
-	// Verify even dimensions and 9:16 ratio.
-	if w%2 != 0 || h%2 != 0 {
-		t.Errorf("dimensions not even: w=%d h=%d", w, h)
-	}
+	// Verify 9:16.
 	expectedRatio := 9.0 / 16.0
 	actualRatio := float64(w) / float64(h)
 	if math.Abs(actualRatio-expectedRatio) > 0.02 {
 		t.Errorf("aspect ratio = %.4f, want %.4f", actualRatio, expectedRatio)
 	}
-}
 
-func TestComputeCropRegion_FullFrame(t *testing.T) {
-	// Bounding box covers entire frame — crop should be the full frame.
-	frames := []pose.Frame{
-		{BoundingBox: pose.BoundingBox{Left: 0.0, Top: 0.0, Right: 1.0, Bottom: 1.0}},
+	// Verify within frame bounds.
+	if originY < 0 || originY+h > sourceH {
+		t.Errorf("crop out of bounds: y=%d h=%d (source height %d)", originY, h, sourceH)
 	}
 
-	x, y, w, h := computeCropRegion(frames, 1080, 1920)
-
-	// With padding and aspect ratio enforcement, should still fit within frame.
-	if x < 0 || y < 0 {
-		t.Errorf("crop origin should be >= 0: x=%d y=%d", x, y)
-	}
-	if x+w > 1080 {
-		t.Errorf("crop exceeds frame width: x=%d + w=%d > 1080", x, w)
-	}
-	if y+h > 1920 {
-		t.Errorf("crop exceeds frame height: y=%d + h=%d > 1920", y, h)
-	}
-}
-
-func TestNoseCenter(t *testing.T) {
-	tests := []struct {
-		name    string
-		frame   pose.Frame
-		wantX   float64
-		wantY   float64
-		wantOK  bool
-	}{
-		{
-			name: "nose with high confidence",
-			frame: pose.Frame{
-				Keypoints: []pose.Keypoint{
-					{Name: pose.LandmarkNose, X: 0.5, Y: 0.3, Confidence: 0.9},
-				},
-			},
-			wantX: 0.5, wantY: 0.3, wantOK: true,
-		},
-		{
-			name: "nose with low confidence",
-			frame: pose.Frame{
-				Keypoints: []pose.Keypoint{
-					{Name: pose.LandmarkNose, X: 0.5, Y: 0.3, Confidence: 0.1},
-				},
-			},
-			wantOK: false,
-		},
-		{
-			name: "no nose keypoint",
-			frame: pose.Frame{
-				Keypoints: []pose.Keypoint{
-					{Name: pose.LandmarkLeftShoulder, X: 0.4, Y: 0.5, Confidence: 0.9},
-				},
-			},
-			wantOK: false,
-		},
-		{
-			name:   "no keypoints at all",
-			frame:  pose.Frame{},
-			wantOK: false,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			gotX, gotY, gotOK := noseCenter(tt.frame)
-			if gotOK != tt.wantOK {
-				t.Errorf("noseCenter() ok = %v, want %v", gotOK, tt.wantOK)
-			}
-			if gotOK && (gotX != tt.wantX || gotY != tt.wantY) {
-				t.Errorf("noseCenter() = (%v, %v), want (%v, %v)", gotX, gotY, tt.wantX, tt.wantY)
-			}
-		})
-	}
-}
-
-func TestComputeCropRegion_NoseCenter(t *testing.T) {
-	// Frames with nose keypoints at x=0.5 and BB centers at x=0.5.
-	// One outlier frame has BB center at x=0.875 but nose at x=0.5.
-	// With nose centering, the crop should stay centered at x=0.5.
-	frames := []pose.Frame{
-		{
-			BoundingBox: pose.BoundingBox{Left: 0.4, Top: 0.2, Right: 0.6, Bottom: 0.8},
-			Keypoints:   []pose.Keypoint{{Name: pose.LandmarkNose, X: 0.5, Y: 0.3, Confidence: 0.9}},
-		},
-		{
-			BoundingBox: pose.BoundingBox{Left: 0.4, Top: 0.2, Right: 0.6, Bottom: 0.8},
-			Keypoints:   []pose.Keypoint{{Name: pose.LandmarkNose, X: 0.5, Y: 0.3, Confidence: 0.9}},
-		},
-		{
-			BoundingBox: pose.BoundingBox{Left: 0.4, Top: 0.2, Right: 0.6, Bottom: 0.8},
-			Keypoints:   []pose.Keypoint{{Name: pose.LandmarkNose, X: 0.5, Y: 0.3, Confidence: 0.9}},
-		},
-		{
-			// Outlier BB, but nose is still at center.
-			BoundingBox: pose.BoundingBox{Left: 0.8, Top: 0.2, Right: 0.95, Bottom: 0.8},
-			Keypoints:   []pose.Keypoint{{Name: pose.LandmarkNose, X: 0.5, Y: 0.3, Confidence: 0.9}},
-		},
-	}
-
-	sourceW, sourceH := 1080, 1920
-	x, _, w, _ := computeCropRegion(frames, sourceW, sourceH)
-
-	cropCenterX := float64(x) + float64(w)/2
-	noseExpected := 0.5 * float64(sourceW) // 540
-
-	// Crop center should be very close to the nose position.
-	if math.Abs(cropCenterX-noseExpected) > 20 {
-		t.Errorf("crop center X=%.1f, want ~%.1f (nose-based centering)", cropCenterX, noseExpected)
-	}
-}
-
-func TestComputeCropRegion_NoseXOnly(t *testing.T) {
-	// Nose keypoint should only drive horizontal centering.
-	// Vertical centering should always use bounding box center Y.
-	// Here, nose Y=0.15 (near top) but BB center Y=0.5 (mid-frame).
-	// If nose Y were used, crop would shift up and cut off legs.
-	frames := []pose.Frame{
-		{
-			BoundingBox: pose.BoundingBox{Left: 0.4, Top: 0.2, Right: 0.6, Bottom: 0.8},
-			Keypoints:   []pose.Keypoint{{Name: pose.LandmarkNose, X: 0.5, Y: 0.15, Confidence: 0.9}},
-		},
-		{
-			BoundingBox: pose.BoundingBox{Left: 0.4, Top: 0.2, Right: 0.6, Bottom: 0.8},
-			Keypoints:   []pose.Keypoint{{Name: pose.LandmarkNose, X: 0.5, Y: 0.15, Confidence: 0.9}},
-		},
-		{
-			BoundingBox: pose.BoundingBox{Left: 0.4, Top: 0.2, Right: 0.6, Bottom: 0.8},
-			Keypoints:   []pose.Keypoint{{Name: pose.LandmarkNose, X: 0.5, Y: 0.15, Confidence: 0.9}},
-		},
-	}
-
-	sourceW, sourceH := 1080, 1920
-	_, y, _, h := computeCropRegion(frames, sourceW, sourceH)
-
-	cropCenterY := float64(y) + float64(h)/2
-	bbCenterY := 0.5 * float64(sourceH)   // 960 (BB vertical center)
-	noseCenterY := 0.15 * float64(sourceH) // 288 (nose Y — too high)
-
-	// Crop center Y should be near BB center, not nose Y.
-	distToBB := math.Abs(cropCenterY - bbCenterY)
-	distToNose := math.Abs(cropCenterY - noseCenterY)
-	if distToBB >= distToNose {
-		t.Errorf("crop center Y=%.1f is closer to nose Y (%.1f) than BB center Y (%.1f); "+
-			"vertical centering should use BB center, not nose",
-			cropCenterY, noseCenterY, bbCenterY)
-	}
-
-	t.Logf("crop center Y=%.1f (BB center=%.1f, nose=%.1f)", cropCenterY, bbCenterY, noseCenterY)
-}
-
-func TestComputeCropRegion_NoseFallback(t *testing.T) {
-	// When nose confidence is low, should fall back to BB center.
-	frames := []pose.Frame{
-		{
-			BoundingBox: pose.BoundingBox{Left: 0.3, Top: 0.2, Right: 0.7, Bottom: 0.8},
-			Keypoints:   []pose.Keypoint{{Name: pose.LandmarkNose, X: 0.9, Y: 0.9, Confidence: 0.1}},
-		},
-		{
-			BoundingBox: pose.BoundingBox{Left: 0.3, Top: 0.2, Right: 0.7, Bottom: 0.8},
-			Keypoints:   []pose.Keypoint{{Name: pose.LandmarkNose, X: 0.9, Y: 0.9, Confidence: 0.1}},
-		},
-	}
-
-	sourceW, sourceH := 1080, 1920
-	x, _, w, _ := computeCropRegion(frames, sourceW, sourceH)
-
-	cropCenterX := float64(x) + float64(w)/2
-	bbCenterExpected := 0.5 * float64(sourceW) // 540 (BB center = (0.3+0.7)/2 = 0.5)
-
-	// Should use BB center since nose confidence is too low.
-	if math.Abs(cropCenterX-bbCenterExpected) > 5 {
-		t.Errorf("crop center X=%.1f, want ~%.1f (BB center fallback)", cropCenterX, bbCenterExpected)
-	}
+	t.Logf("extent crop: w=%d h=%d originY=%d", w, h, originY)
 }

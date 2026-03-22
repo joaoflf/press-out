@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"os/exec"
 	"strconv"
@@ -157,6 +158,87 @@ func GetDimensions(ctx context.Context, input string) (width, height int, err er
 		return 0, 0, fmt.Errorf("failed to parse dimensions from %q", string(stdout))
 	}
 	return w, h, nil
+}
+
+// GetFPS returns the video frame rate via ffprobe.
+func GetFPS(ctx context.Context, input string) (float64, error) {
+	stdout, _, err := RunProbe(ctx,
+		"-v", "error",
+		"-select_streams", "v:0",
+		"-show_entries", "stream=r_frame_rate",
+		"-of", "default=noprint_wrappers=1:nokey=1",
+		input,
+	)
+	if err != nil {
+		return 0, err
+	}
+
+	s := strings.TrimSpace(string(stdout))
+	// r_frame_rate is a fraction like "30/1" or "30000/1001".
+	parts := strings.SplitN(s, "/", 2)
+	if len(parts) != 2 {
+		return 0, fmt.Errorf("unexpected r_frame_rate format %q", s)
+	}
+	num, err := strconv.ParseFloat(parts[0], 64)
+	if err != nil {
+		return 0, fmt.Errorf("failed to parse r_frame_rate numerator %q: %w", parts[0], err)
+	}
+	den, err := strconv.ParseFloat(parts[1], 64)
+	if err != nil {
+		return 0, fmt.Errorf("failed to parse r_frame_rate denominator %q: %w", parts[1], err)
+	}
+	if den == 0 {
+		return 0, fmt.Errorf("r_frame_rate denominator is zero")
+	}
+	return num / den, nil
+}
+
+// DecodeFrames starts FFmpeg decoding to raw RGB24 frames piped to stdout.
+// Caller must read from the returned ReadCloser and call cmd.Wait() when done.
+func DecodeFrames(ctx context.Context, input string) (*exec.Cmd, io.ReadCloser, error) {
+	cmd := exec.CommandContext(ctx, "ffmpeg", "-y",
+		"-i", input,
+		"-f", "rawvideo",
+		"-pix_fmt", "rgb24",
+		"pipe:1",
+	)
+	slog.Info("ffmpeg: decode start", "input", input)
+
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, nil, fmt.Errorf("decode: stdout pipe: %w", err)
+	}
+	if err := cmd.Start(); err != nil {
+		return nil, nil, fmt.Errorf("decode: start: %w", err)
+	}
+	return cmd, stdout, nil
+}
+
+// EncodeFrames starts FFmpeg encoding from raw RGB24 frames piped from stdin.
+// Caller must write to the returned WriteCloser, close it, then call cmd.Wait().
+func EncodeFrames(ctx context.Context, output string, w, h int, fps float64) (*exec.Cmd, io.WriteCloser, error) {
+	cmd := exec.CommandContext(ctx, "ffmpeg", "-y",
+		"-f", "rawvideo",
+		"-pix_fmt", "rgb24",
+		"-s", fmt.Sprintf("%dx%d", w, h),
+		"-r", formatSeconds(fps),
+		"-i", "pipe:0",
+		"-c:v", "libx264",
+		"-preset", "fast",
+		"-pix_fmt", "yuv420p",
+		"-movflags", "+faststart",
+		output,
+	)
+	slog.Info("ffmpeg: encode start", "output", output, "size", fmt.Sprintf("%dx%d", w, h), "fps", fps)
+
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return nil, nil, fmt.Errorf("encode: stdin pipe: %w", err)
+	}
+	if err := cmd.Start(); err != nil {
+		return nil, nil, fmt.Errorf("encode: start: %w", err)
+	}
+	return cmd, stdin, nil
 }
 
 func formatSeconds(sec float64) string {
