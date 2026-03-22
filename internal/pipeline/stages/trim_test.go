@@ -2,6 +2,7 @@ package stages
 
 import (
 	"context"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -29,20 +30,34 @@ func skipIfNoFFprobe(t *testing.T) {
 
 func sampleLiftVideo(t *testing.T) string {
 	t.Helper()
-	path := filepath.Join("..", "..", "..", "testdata", "videos", "sample-lift.mp4")
-	if _, err := os.Stat(path); os.IsNotExist(err) {
-		t.Skipf("sample-lift video not found at %s", path)
+	// Try new location first, fall back to old.
+	for _, rel := range []string{
+		filepath.Join("testdata", "videos", "sample-snatch-1.mp4"),
+		filepath.Join("testdata", "videos", "sample-lift.mp4"),
+	} {
+		path := filepath.Join("..", "..", "..", rel)
+		if _, err := os.Stat(path); err == nil {
+			return path
+		}
 	}
-	return path
+	t.Skip("no sample lift video found")
+	return ""
 }
 
 func sampleKeypointsPath(t *testing.T) string {
 	t.Helper()
-	path := filepath.Join("..", "..", "..", "testdata", "keypoints-sample.json")
-	if _, err := os.Stat(path); os.IsNotExist(err) {
-		t.Skipf("keypoints-sample.json not found at %s", path)
+	// Try new location first, fall back to old.
+	for _, rel := range []string{
+		filepath.Join("testdata", "videos", "sample-snatch-1.json"),
+		filepath.Join("testdata", "keypoints-sample.json"),
+	} {
+		path := filepath.Join("..", "..", "..", rel)
+		if _, err := os.Stat(path); err == nil {
+			return path
+		}
 	}
-	return path
+	t.Skip("no sample keypoints found")
+	return ""
 }
 
 func TestTrimStage_Name(t *testing.T) {
@@ -64,7 +79,7 @@ func TestTrimStage_WithKeypoints(t *testing.T) {
 		t.Fatalf("failed to create lift dir: %v", err)
 	}
 
-	// Copy sample-lift.mp4 to the expected original.mp4 location.
+	// Copy sample video to the expected original.mp4 location.
 	origPath := storage.LiftFile(tmpDir, liftID, storage.FileOriginal)
 	data, err := os.ReadFile(video)
 	if err != nil {
@@ -74,7 +89,7 @@ func TestTrimStage_WithKeypoints(t *testing.T) {
 		t.Fatalf("failed to write original video: %v", err)
 	}
 
-	// Copy keypoints-sample.json to the lift directory.
+	// Copy keypoints to the lift directory.
 	kpDst := storage.LiftFile(tmpDir, liftID, storage.FileKeypoints)
 	kpData, err := os.ReadFile(kpSrc)
 	if err != nil {
@@ -112,7 +127,7 @@ func TestTrimStage_WithKeypoints(t *testing.T) {
 		if err != nil {
 			t.Fatalf("failed to get trimmed duration: %v", err)
 		}
-		// Expect trimmed duration roughly 6-10s (lift ~4s + padding ~3s).
+		// Density-bridged produces tighter trim. Expect 4-10s range.
 		if dur < 3 || dur > 14 {
 			t.Errorf("trimmed duration %fs outside expected range [3, 14]", dur)
 		}
@@ -224,10 +239,7 @@ func TestTrimStage_FFmpegFailure(t *testing.T) {
 	// Write keypoints that produce a confident detection, but use a
 	// nonexistent video file so FFmpeg fails.
 	kpPath := storage.LiftFile(tmpDir, liftID, storage.FileKeypoints)
-	kpSrc := filepath.Join("..", "..", "..", "testdata", "keypoints-sample.json")
-	if _, err := os.Stat(kpSrc); os.IsNotExist(err) {
-		t.Skipf("keypoints-sample.json not found at %s", kpSrc)
-	}
+	kpSrc := sampleKeypointsPath(t)
 	kpData, err := os.ReadFile(kpSrc)
 	if err != nil {
 		t.Fatalf("failed to read keypoints: %v", err)
@@ -262,10 +274,7 @@ func TestTrimStage_ContextCancellation(t *testing.T) {
 
 	// Write keypoints that produce a confident detection.
 	kpPath := storage.LiftFile(tmpDir, liftID, storage.FileKeypoints)
-	kpSrc := filepath.Join("..", "..", "..", "testdata", "keypoints-sample.json")
-	if _, err := os.Stat(kpSrc); os.IsNotExist(err) {
-		t.Skipf("keypoints-sample.json not found at %s", kpSrc)
-	}
+	kpSrc := sampleKeypointsPath(t)
 	kpData, err := os.ReadFile(kpSrc)
 	if err != nil {
 		t.Fatalf("failed to read keypoints: %v", err)
@@ -290,12 +299,12 @@ func TestTrimStage_ContextCancellation(t *testing.T) {
 	}
 }
 
-func TestDetectLiftFromKeypoints(t *testing.T) {
+func TestDetectLiftDensityBridged(t *testing.T) {
 	kpPath := sampleKeypointsPath(t)
 
-	startSec, endSec, confident, err := detectLiftFromKeypoints(kpPath)
+	startSec, endSec, confident, err := detectLiftDensityBridged(kpPath)
 	if err != nil {
-		t.Fatalf("detectLiftFromKeypoints() error: %v", err)
+		t.Fatalf("detectLiftDensityBridged() error: %v", err)
 	}
 
 	if !confident {
@@ -304,17 +313,81 @@ func TestDetectLiftFromKeypoints(t *testing.T) {
 
 	t.Logf("detected lift: %.2fs - %.2fs (duration: %.2fs)", startSec, endSec, endSec-startSec)
 
-	// The sample video has the lift at ~6-11s. Allow tolerance for algorithm variance.
-	if startSec < 2 || startSec > 10 {
-		t.Errorf("start %.2fs outside expected range [2, 10]", startSec)
+	// Density-bridged algorithm detects the lift window around ~6-11s.
+	if startSec < 3 || startSec > 9 {
+		t.Errorf("start %.2fs outside expected range [3, 9]", startSec)
 	}
-	if endSec < 7 || endSec > 12 {
-		t.Errorf("end %.2fs outside expected range [7, 12]", endSec)
+	if endSec < 8 || endSec > 13 {
+		t.Errorf("end %.2fs outside expected range [8, 13]", endSec)
 	}
 
-	// Lift duration should be reasonable.
 	dur := endSec - startSec
-	if dur < minLiftDuration || dur > maxLiftDuration {
-		t.Errorf("lift duration %.2fs outside [%.1f, %.1f]", dur, minLiftDuration, maxLiftDuration)
+	if dur < trimMinDurationSec || dur > trimMaxDurationSec {
+		t.Errorf("lift duration %.2fs outside [%.1f, %.1f]", dur, trimMinDurationSec, trimMaxDurationSec)
+	}
+}
+
+func TestDetectLiftDensityBridged_AllVideos(t *testing.T) {
+	tests := []struct {
+		name      string
+		jsonFile  string
+		wantStart float64
+		wantEnd   float64
+		tolerance float64
+	}{
+		{
+			name:      "snatch-1",
+			jsonFile:  filepath.Join("..", "..", "..", "testdata", "videos", "sample-snatch-1.json"),
+			wantStart: 4.93,
+			wantEnd:   12.03,
+			tolerance: 2.0,
+		},
+		{
+			name:      "snatch-2",
+			jsonFile:  filepath.Join("..", "..", "..", "testdata", "videos", "sample-snatch-2.json"),
+			wantStart: 14.28,
+			wantEnd:   20.50,
+			tolerance: 2.0,
+		},
+		{
+			name:      "cj-walk-away",
+			jsonFile:  filepath.Join("..", "..", "..", "testdata", "videos", "sample-cj-walk-away.json"),
+			wantStart: 4.25,
+			wantEnd:   15.05,
+			tolerance: 2.0,
+		},
+		{
+			name:      "clean-walk-away",
+			jsonFile:  filepath.Join("..", "..", "..", "testdata", "videos", "sample-clean-walk-away.json"),
+			wantStart: 4.62,
+			wantEnd:   12.08,
+			tolerance: 2.0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, err := os.Stat(tt.jsonFile); os.IsNotExist(err) {
+				t.Skipf("test data not found: %s", tt.jsonFile)
+			}
+
+			startSec, endSec, confident, err := detectLiftDensityBridged(tt.jsonFile)
+			if err != nil {
+				t.Fatalf("detectLiftDensityBridged() error: %v", err)
+			}
+
+			if !confident {
+				t.Fatal("expected confident detection")
+			}
+
+			t.Logf("detected: %.2fs - %.2fs (want: %.2fs - %.2fs)", startSec, endSec, tt.wantStart, tt.wantEnd)
+
+			if math.Abs(startSec-tt.wantStart) > tt.tolerance {
+				t.Errorf("start %.2fs differs from expected %.2fs by more than %.1fs", startSec, tt.wantStart, tt.tolerance)
+			}
+			if math.Abs(endSec-tt.wantEnd) > tt.tolerance {
+				t.Errorf("end %.2fs differs from expected %.2fs by more than %.1fs", endSec, tt.wantEnd, tt.tolerance)
+			}
+		})
 	}
 }

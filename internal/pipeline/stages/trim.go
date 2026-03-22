@@ -16,14 +16,19 @@ import (
 )
 
 const (
-	minKeypointConfidence = 0.5  // minimum keypoint confidence to include in displacement calculation
-	displacementThreshold = 0.01 // normalized displacement above which a frame is considered "high motion"
-	minLiftDuration       = 0.8  // minimum seconds for a valid lift cluster
-	maxLiftDuration       = 15.0 // maximum seconds for a valid lift cluster
-	minHighMotionFrames   = 5    // minimum high-motion frames needed for confidence
-	maxGapSec             = 2.0  // maximum seconds of consecutive low-motion frames allowed within a run
-	paddingSec            = 1.5  // seconds of padding before and after detected boundaries
-	smoothingWindow       = 5    // number of frames for displacement smoothing
+	trimMinKeypointConfidence = 0.5
+	trimSmoothWindow          = 7
+	trimMinWinSec             = 5.0  // wider min to capture CJ's clean+walk+jerk
+	trimMaxWinSec             = 12.0
+	trimWinStepSec            = 0.5
+	trimPaddingSec            = 1.25
+	trimMinDurationSec        = 2.0
+	trimMaxDurationSec        = 18.0
+	trimMinPeakDensity        = 0.002
+	trimSplitDetectGap        = 0.08 // ankle X gap indicating jerk split
+	trimSplitConvergeGap      = 0.05 // recovery complete when gap narrows to this
+	trimMaxRecoverySec        = 3.0  // max forward extension from window end
+	trimAnkleSmoothWindow     = 5    // frames for smoothing noisy ankle gap
 )
 
 // TrimParams holds the trim boundaries so downstream stages can filter by trimmed range.
@@ -52,7 +57,7 @@ func (s *TrimStage) Run(ctx context.Context, input pipeline.StageInput) (pipelin
 	}
 
 	// Detect lift boundaries from keypoints.
-	liftStart, liftEnd, confident, err := detectLiftFromKeypoints(keypointsPath)
+	liftStart, liftEnd, confident, err := detectLiftDensityBridged(keypointsPath)
 	if err != nil {
 		logger.Error("failed to detect lift from keypoints", "error", err, "duration_ms", time.Since(start).Milliseconds())
 		return pipeline.StageOutput{}, fmt.Errorf("trim: detect lift: %w", err)
@@ -73,11 +78,11 @@ func (s *TrimStage) Run(ctx context.Context, input pipeline.StageInput) (pipelin
 	}
 
 	// Apply padding and clamp to video bounds.
-	trimStart := liftStart - paddingSec
+	trimStart := liftStart - trimPaddingSec
 	if trimStart < 0 {
 		trimStart = 0
 	}
-	trimEnd := liftEnd + paddingSec
+	trimEnd := liftEnd + trimPaddingSec
 	if trimEnd > duration {
 		trimEnd = duration
 	}
@@ -116,10 +121,11 @@ func (s *TrimStage) Run(ctx context.Context, input pipeline.StageInput) (pipelin
 	return pipeline.StageOutput{VideoPath: outputPath}, nil
 }
 
-// detectLiftFromKeypoints analyzes keypoint displacement across frames to find
-// the lift's start and end times. It returns the detected boundaries in seconds,
-// a confidence flag, and any error.
-func detectLiftFromKeypoints(keypointsPath string) (startSec, endSec float64, confident bool, err error) {
+// detectLiftDensityBridged analyzes motion diversity across frames to find the lift's
+// start and end times. Motion diversity measures how much individual keypoints deviate
+// from the mean displacement vector — high during lifting (body parts move in different
+// directions), low during walking (uniform translation).
+func detectLiftDensityBridged(keypointsPath string) (startSec, endSec float64, confident bool, err error) {
 	data, err := os.ReadFile(keypointsPath)
 	if err != nil {
 		return 0, 0, false, fmt.Errorf("read keypoints: %w", err)
@@ -131,77 +137,144 @@ func detectLiftFromKeypoints(keypointsPath string) (startSec, endSec float64, co
 	}
 
 	if len(result.Frames) < 2 {
-		slog.Warn("insufficient frames for displacement analysis", "frames", len(result.Frames))
+		slog.Warn("insufficient frames for diversity analysis", "frames", len(result.Frames))
 		return 0, 0, false, nil
 	}
 
-	// Compute frame-to-frame keypoint displacement.
-	displacements := computeDisplacements(result.Frames)
+	// Phase 1: Compute motion diversity signal.
+	diversity := computeMotionDiversity(result.Frames)
 
-	// Smooth with moving average to reduce noise.
-	smoothed := smoothDisplacements(displacements)
+	// Smooth diversity with moving average.
+	smoothed := smoothValues(diversity, trimSmoothWindow)
 
 	// Estimate frame rate from time offsets.
 	fps := estimateFPS(result.Frames)
-	maxGapFrames := int(maxGapSec * fps)
-	if maxGapFrames < 1 {
-		maxGapFrames = 1
+
+	// Phase 2: Densest window search.
+	// Build prefix sum for O(1) window sum queries.
+	prefixSum := make([]float64, len(smoothed)+1)
+	for i, v := range smoothed {
+		prefixSum[i+1] = prefixSum[i] + v
 	}
 
-	// Mark high-motion frames.
-	highMotion := make([]bool, len(smoothed))
-	for i, d := range smoothed {
-		highMotion[i] = d > displacementThreshold
+	minWinFrames := int(trimMinWinSec * fps)
+	maxWinFrames := int(trimMaxWinSec * fps)
+	winStepFrames := int(trimWinStepSec * fps)
+	if minWinFrames < 1 {
+		minWinFrames = 1
+	}
+	if maxWinFrames > len(smoothed) {
+		maxWinFrames = len(smoothed)
+	}
+	if winStepFrames < 1 {
+		winStepFrames = 1
 	}
 
-	// Merge high-motion frames into runs, bridging gaps.
-	runs := mergeRuns(highMotion, smoothed, maxGapFrames)
+	var bestDensity float64
+	var bestStart, bestEnd int
+	found := false
 
-	if len(runs) == 0 {
-		slog.Warn("no high-motion frames detected")
-		return 0, 0, false, nil
-	}
-
-	// Select the run with the highest total displacement.
-	bestRun := runs[0]
-	for _, r := range runs[1:] {
-		if r.totalDisp > bestRun.totalDisp {
-			bestRun = r
+	for winSize := minWinFrames; winSize <= maxWinFrames; winSize += winStepFrames {
+		for start := 0; start+winSize <= len(smoothed); start++ {
+			end := start + winSize
+			windowSum := prefixSum[end] - prefixSum[start]
+			density := windowSum / float64(winSize)
+			if density > bestDensity {
+				bestDensity = density
+				bestStart = start
+				bestEnd = end
+				found = true
+			}
 		}
 	}
 
-	// Convert frame indices to times.
-	// Frame index i in displacements corresponds to the transition between
-	// result.Frames[i] and result.Frames[i+1]. Use the time of the start frame.
-	startSec = float64(result.Frames[bestRun.startIdx+1].TimeOffsetMs) / 1000.0
-	endIdx := bestRun.endIdx + 1
-	if endIdx >= len(result.Frames) {
-		endIdx = len(result.Frames) - 1
+	if !found || bestDensity < trimMinPeakDensity {
+		slog.Warn("no dense lift window found", "best_density", bestDensity, "threshold", trimMinPeakDensity)
+		return 0, 0, false, nil
 	}
-	endSec = float64(result.Frames[endIdx].TimeOffsetMs) / 1000.0
+
+	// Phase 2.5: Ankle split recovery extension.
+	// After a jerk catch, the lifter is in a split stance. Extend end until feet converge.
+	endFrame := bestEnd
+	lookAheadFrames := int(0.5 * fps)
+	scanStart := endFrame
+	scanEnd := endFrame + lookAheadFrames
+	if scanEnd > len(result.Frames)-1 {
+		scanEnd = len(result.Frames) - 1
+	}
+
+	// Check ankle gap at/near window end.
+	var maxGapNearEnd float64
+	for fi := scanStart; fi <= scanEnd && fi < len(result.Frames); fi++ {
+		gap, ok := getAnkleGap(result.Frames[fi])
+		if ok && gap > maxGapNearEnd {
+			maxGapNearEnd = gap
+		}
+	}
+
+	if maxGapNearEnd >= trimSplitDetectGap {
+		// Split stance detected — extend until feet converge.
+		maxRecoveryFrames := int(trimMaxRecoverySec * fps)
+		recoveryLimit := endFrame + maxRecoveryFrames
+		if recoveryLimit > len(result.Frames)-1 {
+			recoveryLimit = len(result.Frames) - 1
+		}
+
+		// Collect raw ankle gaps for smoothing.
+		rawGaps := make([]float64, 0, recoveryLimit-endFrame+1)
+		for fi := endFrame; fi <= recoveryLimit; fi++ {
+			gap, ok := getAnkleGap(result.Frames[fi])
+			if !ok {
+				rawGaps = append(rawGaps, maxGapNearEnd) // carry forward last known
+			} else {
+				rawGaps = append(rawGaps, gap)
+			}
+		}
+
+		smoothedGaps := smoothValues(rawGaps, trimAnkleSmoothWindow)
+
+		// Find first frame where smoothed gap < convergence threshold.
+		for i, sg := range smoothedGaps {
+			if sg < trimSplitConvergeGap {
+				endFrame = endFrame + i
+				break
+			}
+			if i == len(smoothedGaps)-1 {
+				// No convergence found — extend to scan limit.
+				endFrame = recoveryLimit
+			}
+		}
+	}
+
+	// Phase 3: Convert frame indices to seconds + padding.
+	// diversity[i] represents the transition from frames[i] to frames[i+1].
+	// bestStart in diversity corresponds to the transition starting at frames[bestStart].
+	// Use frames[bestStart+1] as the start time (the frame after the first transition).
+	startFrameIdx := bestStart + 1
+	if startFrameIdx >= len(result.Frames) {
+		startFrameIdx = len(result.Frames) - 1
+	}
+	endFrameIdx := endFrame
+	if endFrameIdx >= len(result.Frames) {
+		endFrameIdx = len(result.Frames) - 1
+	}
+
+	startSec = float64(result.Frames[startFrameIdx].TimeOffsetMs) / 1000.0
+	endSec = float64(result.Frames[endFrameIdx].TimeOffsetMs) / 1000.0
 
 	// Validate duration.
 	liftDuration := endSec - startSec
-	if liftDuration < minLiftDuration {
-		slog.Warn("cluster too short",
+	if liftDuration < trimMinDurationSec {
+		slog.Warn("density window too short",
 			"duration", fmt.Sprintf("%.1fs", liftDuration),
-			"min", fmt.Sprintf("%.1fs", minLiftDuration),
+			"min", fmt.Sprintf("%.1fs", trimMinDurationSec),
 		)
 		return 0, 0, false, nil
 	}
-	if liftDuration > maxLiftDuration {
-		slog.Warn("cluster too long",
+	if liftDuration > trimMaxDurationSec {
+		slog.Warn("density window too long",
 			"duration", fmt.Sprintf("%.1fs", liftDuration),
-			"max", fmt.Sprintf("%.1fs", maxLiftDuration),
-		)
-		return 0, 0, false, nil
-	}
-
-	// Validate high-motion frame count.
-	if bestRun.highMotionCount < minHighMotionFrames {
-		slog.Warn("insufficient high-motion frames",
-			"count", bestRun.highMotionCount,
-			"min", minHighMotionFrames,
+			"max", fmt.Sprintf("%.1fs", trimMaxDurationSec),
 		)
 		return 0, 0, false, nil
 	}
@@ -209,17 +282,13 @@ func detectLiftFromKeypoints(keypointsPath string) (startSec, endSec float64, co
 	return startSec, endSec, true, nil
 }
 
-// motionRun represents a contiguous run of high-motion frames.
-type motionRun struct {
-	startIdx        int
-	endIdx          int
-	totalDisp       float64
-	highMotionCount int
-}
-
-// computeDisplacements calculates frame-to-frame normalized keypoint displacement.
-func computeDisplacements(frames []pose.Frame) []float64 {
-	displacements := make([]float64, len(frames)-1)
+// computeMotionDiversity computes per-frame-transition motion diversity.
+// For each consecutive frame pair, it measures how much individual keypoints
+// deviate from the mean displacement vector. High values indicate lifting
+// (body parts moving in different directions), low values indicate walking
+// or stillness (uniform translation).
+func computeMotionDiversity(frames []pose.Frame) []float64 {
+	diversity := make([]float64, len(frames)-1)
 
 	for i := 1; i < len(frames); i++ {
 		prevKPs := make(map[string]pose.Keypoint, len(frames[i-1].Keypoints))
@@ -227,47 +296,92 @@ func computeDisplacements(frames []pose.Frame) []float64 {
 			prevKPs[kp.Name] = kp
 		}
 
-		var totalDisp float64
-		var count int
+		// Collect per-keypoint displacement vectors for confident keypoints.
+		type vec struct{ dx, dy float64 }
+		var disps []vec
+
 		for _, kp := range frames[i].Keypoints {
 			prev, ok := prevKPs[kp.Name]
 			if !ok {
 				continue
 			}
-			if prev.Confidence < minKeypointConfidence || kp.Confidence < minKeypointConfidence {
+			if prev.Confidence < trimMinKeypointConfidence || kp.Confidence < trimMinKeypointConfidence {
 				continue
 			}
-			dx := kp.X - prev.X
-			dy := kp.Y - prev.Y
-			totalDisp += math.Sqrt(dx*dx + dy*dy)
-			count++
+			disps = append(disps, vec{dx: kp.X - prev.X, dy: kp.Y - prev.Y})
 		}
 
-		if count > 0 {
-			displacements[i-1] = totalDisp / float64(count)
+		if len(disps) == 0 {
+			continue
+		}
+
+		// Compute mean displacement vector (rigid body translation).
+		var meanDX, meanDY float64
+		for _, d := range disps {
+			meanDX += d.dx
+			meanDY += d.dy
+		}
+		meanDX /= float64(len(disps))
+		meanDY /= float64(len(disps))
+
+		// Compute per-keypoint deviation from mean vector.
+		var totalDeviation float64
+		for _, d := range disps {
+			devX := d.dx - meanDX
+			devY := d.dy - meanDY
+			totalDeviation += math.Sqrt(devX*devX + devY*devY)
+		}
+
+		diversity[i-1] = totalDeviation / float64(len(disps))
+	}
+
+	return diversity
+}
+
+// getAnkleGap returns the horizontal distance between left and right ankle keypoints.
+// Returns the gap and whether both ankles were found with sufficient confidence.
+func getAnkleGap(frame pose.Frame) (float64, bool) {
+	var leftX, rightX float64
+	var foundLeft, foundRight bool
+
+	for _, kp := range frame.Keypoints {
+		if kp.Confidence < trimMinKeypointConfidence {
+			continue
+		}
+		switch kp.Name {
+		case pose.LandmarkLeftAnkle:
+			leftX = kp.X
+			foundLeft = true
+		case pose.LandmarkRightAnkle:
+			rightX = kp.X
+			foundRight = true
 		}
 	}
 
-	return displacements
+	if !foundLeft || !foundRight {
+		return 0, false
+	}
+
+	return math.Abs(leftX - rightX), true
 }
 
-// smoothDisplacements applies a moving average to reduce noise.
-func smoothDisplacements(displacements []float64) []float64 {
-	smoothed := make([]float64, len(displacements))
-	halfWin := smoothingWindow / 2
+// smoothValues applies a moving average to reduce noise in a signal.
+func smoothValues(values []float64, window int) []float64 {
+	smoothed := make([]float64, len(values))
+	halfWin := window / 2
 
-	for i := range displacements {
+	for i := range values {
 		start := i - halfWin
 		if start < 0 {
 			start = 0
 		}
 		end := i + halfWin + 1
-		if end > len(displacements) {
-			end = len(displacements)
+		if end > len(values) {
+			end = len(values)
 		}
 		var sum float64
 		for j := start; j < end; j++ {
-			sum += displacements[j]
+			sum += values[j]
 		}
 		smoothed[i] = sum / float64(end-start)
 	}
@@ -285,37 +399,4 @@ func estimateFPS(frames []pose.Frame) float64 {
 		return 30.0
 	}
 	return float64(len(frames)-1) / (float64(totalMs) / 1000.0)
-}
-
-// mergeRuns merges high-motion frames into contiguous runs, bridging gaps
-// of up to maxGapFrames consecutive low-motion frames.
-func mergeRuns(highMotion []bool, displacements []float64, maxGapFrames int) []motionRun {
-	var runs []motionRun
-	var current *motionRun
-	gap := 0
-
-	for i, hm := range highMotion {
-		if hm {
-			if current == nil {
-				current = &motionRun{startIdx: i}
-			}
-			current.totalDisp += displacements[i]
-			current.highMotionCount++
-			current.endIdx = i
-			gap = 0
-		} else if current != nil {
-			gap++
-			if gap > maxGapFrames {
-				runs = append(runs, *current)
-				current = nil
-				gap = 0
-			}
-		}
-	}
-
-	if current != nil {
-		runs = append(runs, *current)
-	}
-
-	return runs
 }
