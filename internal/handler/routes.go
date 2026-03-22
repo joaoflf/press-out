@@ -33,6 +33,7 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /lifts/{id}/events", s.HandleLiftEvents)
 
 	// HTMX partials
+	mux.HandleFunc("GET /lifts/{id}/list-item", s.HandleGetLiftListItem)
 	mux.HandleFunc("GET /lifts/{id}/coaching", s.HandleLiftCoaching)
 	mux.HandleFunc("GET /lifts/{id}/status", s.HandleLiftStatus)
 

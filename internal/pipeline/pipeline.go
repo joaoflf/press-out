@@ -100,27 +100,28 @@ func (p *Pipeline) emitEvents(liftID int64, states []StageState) {
 // RenderStagesHTML builds the full pipeline checklist HTML for the detail page.
 func RenderStagesHTML(stages []Stage, states []StageState) string {
 	var b strings.Builder
-	b.WriteString(`<div class="flex flex-col gap-3">`)
+	b.WriteString(`<div class="flex flex-col gap-2">`)
 	for i, stage := range stages {
 		state := states[i]
-		b.WriteString(`<div class="flex items-center gap-3">`)
+		b.WriteString(`<div class="flex items-center gap-2">`)
 
 		switch state {
 		case StateComplete:
-			b.WriteString(`<div class="w-6 h-6 rounded-full bg-success flex items-center justify-center flex-shrink-0">`)
-			b.WriteString(`<svg class="w-3.5 h-3.5 text-success-content" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3">`)
+			b.WriteString(`<div class="w-5 h-5 rounded-full bg-success flex items-center justify-center flex-shrink-0">`)
+			b.WriteString(`<svg class="w-3 h-3 text-success-content" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3">`)
 			b.WriteString(`<path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg></div>`)
 			b.WriteString(fmt.Sprintf(`<span class="text-sm">%s</span>`, stage.Name()))
 		case StateActive:
-			b.WriteString(`<span class="loading loading-spinner loading-sm text-primary flex-shrink-0"></span>`)
+			b.WriteString(`<div class="w-5 h-5 flex items-center justify-center flex-shrink-0">`)
+			b.WriteString(`<span class="loading loading-spinner loading-xs text-primary"></span></div>`)
 			b.WriteString(fmt.Sprintf(`<span class="text-sm font-medium text-primary">%s</span>`, stage.Name()))
 		case StateSkipped:
-			b.WriteString(`<div class="w-6 h-6 rounded-full bg-warning flex items-center justify-center flex-shrink-0">`)
-			b.WriteString(`<svg class="w-3.5 h-3.5 text-warning-content" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">`)
+			b.WriteString(`<div class="w-5 h-5 rounded-full bg-warning flex items-center justify-center flex-shrink-0">`)
+			b.WriteString(`<svg class="w-3 h-3 text-warning-content" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">`)
 			b.WriteString(`<path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01"/></svg></div>`)
 			b.WriteString(fmt.Sprintf(`<span class="text-sm text-base-content/50">%s</span>`, stage.Name()))
 		default: // pending
-			b.WriteString(`<div class="w-6 h-6 rounded-full border-2 border-base-content/20 flex-shrink-0"></div>`)
+			b.WriteString(`<div class="w-5 h-5 rounded-full border-2 border-base-content/20 flex-shrink-0"></div>`)
 			b.WriteString(fmt.Sprintf(`<span class="text-sm text-base-content/40">%s</span>`, stage.Name()))
 		}
 
@@ -159,6 +160,7 @@ func RenderStatusHTML(stages []Stage, states []StageState) string {
 		`<div class="flex items-center gap-1.5">`+
 			`<span class="loading loading-spinner loading-xs text-primary"></span>`+
 			`<span class="text-xs text-base-content/70">%s</span>`+
+			`<span class="text-xs text-base-content/40">·</span>`+
 			`<span class="text-xs text-base-content/40">%d of %d</span></div>`,
 		activeName, completedCount+1, total,
 	)

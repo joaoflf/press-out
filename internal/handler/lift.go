@@ -331,6 +331,40 @@ func (s *Server) HandleReprocess(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+// HandleGetLiftListItem returns the lift-list-item partial for a single lift.
+func (s *Server) HandleGetLiftListItem(w http.ResponseWriter, r *http.Request) {
+	idStr := r.PathValue("id")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		http.Error(w, "Not Found", http.StatusNotFound)
+		return
+	}
+
+	lift, err := s.Queries.GetLift(r.Context(), id)
+	if err != nil {
+		http.Error(w, "Not Found", http.StatusNotFound)
+		return
+	}
+
+	thumbPath := storage.LiftFile(s.DataDir, id, storage.FileThumbnail)
+	_, thumbErr := os.Stat(thumbPath)
+
+	item := LiftItem{
+		ID:           lift.ID,
+		LiftType:     lift.LiftType,
+		CreatedAt:    lift.CreatedAt,
+		DisplayType:  formatLiftType(lift.LiftType),
+		DisplayDate:  formatDate(lift.CreatedAt),
+		HasThumbnail: thumbErr == nil,
+		Processing:   s.Broker != nil && s.Broker.IsProcessing(lift.ID),
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := s.Templates["lift-list.html"].ExecuteTemplate(w, "lift-list-item", item); err != nil {
+		slog.Error("failed to render list item template", "error", err)
+	}
+}
+
 // HandleLiftCoaching handles GET /lifts/{id}/coaching (stub for later stories).
 func (s *Server) HandleLiftCoaching(w http.ResponseWriter, r *http.Request) {
 	http.Error(w, "Not Implemented", http.StatusNotImplemented)

@@ -1,6 +1,7 @@
 {{define "lift-list-item"}}
 {{if .Processing}}
-<div hx-ext="sse" sse-connect="/lifts/{{.ID}}/events" sse-close="pipeline-done">
+<div hx-ext="sse" sse-connect="/lifts/{{.ID}}/events"
+     hx-get="/lifts/{{.ID}}/list-item" hx-trigger="sse:pipeline-done" hx-swap="outerHTML">
     <a href="/lifts/{{.ID}}" class="flex items-center gap-3 p-3 rounded-lg bg-neutral min-h-[56px]">
         <div class="w-12 h-12 rounded bg-primary/10 flex items-center justify-center flex-shrink-0">
             <span class="loading loading-spinner loading-sm text-primary"></span>
