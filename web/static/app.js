@@ -2,7 +2,6 @@ document.addEventListener("DOMContentLoaded", function () {
   // --- Video Player: Toggle & Speed Controls ---
   var video = document.getElementById("lift-video");
   if (video) {
-    var overlay = document.getElementById("video-toggle-overlay");
     var badge = document.getElementById("mode-badge");
     var speedBtns = document.querySelectorAll(".speed-btn");
 
@@ -30,15 +29,7 @@ document.addEventListener("DOMContentLoaded", function () {
 
     var isSkeleton = true;
 
-    if (overlay && video.dataset.skeletonSrc && video.dataset.cleanSrc) {
-      overlay.addEventListener("click", function (e) {
-        e.preventDefault();
-        e.stopPropagation();
-        toggleVideo();
-      });
-    }
-
-    // Badge in Playback card also toggles
+    // Badge in Playback card toggles skeleton/clean
     if (badge && video.dataset.skeletonSrc && video.dataset.cleanSrc) {
       badge.addEventListener("click", function () {
         toggleVideo();
