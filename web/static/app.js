@@ -1,4 +1,56 @@
 document.addEventListener("DOMContentLoaded", function () {
+  // --- Video Player: Toggle & Speed Controls ---
+  var video = document.getElementById("lift-video");
+  if (video) {
+    var overlay = document.getElementById("video-toggle-overlay");
+    var badge = document.getElementById("mode-badge");
+    var speedBtns = document.querySelectorAll(".speed-btn");
+
+    // Toggle handler (skeleton <-> clean)
+    if (overlay && video.dataset.skeletonSrc && video.dataset.cleanSrc) {
+      var isSkeleton = true;
+      overlay.addEventListener("click", function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+
+        var time = video.currentTime;
+        var rate = video.playbackRate;
+        var wasPaused = video.paused;
+
+        video.src = isSkeleton ? video.dataset.cleanSrc : video.dataset.skeletonSrc;
+        isSkeleton = !isSkeleton;
+
+        video.addEventListener("loadedmetadata", function () {
+          video.currentTime = time;
+          video.playbackRate = rate;
+          if (!wasPaused) video.play();
+        }, {once: true});
+
+        video.load();
+
+        if (badge) {
+          badge.textContent = isSkeleton ? "Skeleton" : "Clean";
+        }
+      });
+    }
+
+    // Speed handler
+    for (var i = 0; i < speedBtns.length; i++) {
+      speedBtns[i].addEventListener("click", function () {
+        var speed = parseFloat(this.dataset.speed);
+        video.playbackRate = speed;
+
+        for (var j = 0; j < speedBtns.length; j++) {
+          speedBtns[j].classList.remove("text-[#8BA888]");
+          speedBtns[j].classList.add("text-white/80");
+        }
+        this.classList.remove("text-white/80");
+        this.classList.add("text-[#8BA888]");
+      });
+    }
+  }
+
+  // --- Upload Form ---
   var fileInput = document.getElementById("upload-file");
   var submitBtn = document.getElementById("upload-submit");
   var form = document.getElementById("upload-form");

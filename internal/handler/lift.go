@@ -179,6 +179,9 @@ type LiftDetailData struct {
 	DisplayType string
 	DisplayDate string
 	VideoSrc    string
+	SkeletonSrc string
+	CleanSrc    string
+	HasSkeleton bool
 	Processing  bool
 }
 
@@ -197,14 +200,29 @@ func (s *Server) HandleGetLift(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	videoFile := bestVideoFile(s.DataDir, lift.ID)
+	cleanFile := bestVideoFile(s.DataDir, lift.ID)
+	cleanSrc := fmt.Sprintf("/data/lifts/%d/%s", lift.ID, cleanFile)
+
+	skeletonPath := storage.LiftFile(s.DataDir, lift.ID, storage.FileSkeleton)
+	_, skelErr := os.Stat(skeletonPath)
+	hasSkeleton := skelErr == nil
+
+	videoSrc := cleanSrc
+	var skeletonSrc string
+	if hasSkeleton {
+		skeletonSrc = fmt.Sprintf("/data/lifts/%d/%s", lift.ID, storage.FileSkeleton)
+		videoSrc = skeletonSrc
+	}
 
 	data := LiftDetailData{
 		ID:          lift.ID,
 		LiftType:    lift.LiftType,
 		DisplayType: formatLiftType(lift.LiftType),
 		DisplayDate: formatDate(lift.CreatedAt),
-		VideoSrc:    fmt.Sprintf("/data/lifts/%d/%s", lift.ID, videoFile),
+		VideoSrc:    videoSrc,
+		SkeletonSrc: skeletonSrc,
+		CleanSrc:    cleanSrc,
+		HasSkeleton: hasSkeleton,
 		Processing:  s.Broker != nil && s.Broker.IsProcessing(lift.ID),
 	}
 
