@@ -175,7 +175,7 @@ func TestSkeletonStage_WorksWithoutCropParams(t *testing.T) {
 
 func TestCoordinateTransformation(t *testing.T) {
 	kp := pose.Keypoint{
-		Name:       pose.LandmarkNose,
+		Name:       pose.LandmarkLeftShoulder,
 		X:          0.25,
 		Y:          0.25,
 		Confidence: 0.9,

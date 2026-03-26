@@ -21,6 +21,7 @@ const (
 	skeletonConfidenceThreshold = 0.3
 	skeletonBoneThickness       = 3
 	skeletonJointRadius         = 5
+	skeletonSmoothWindow        = 7
 )
 
 // Skeleton bone colors: left side = cyan, right side = magenta, center = lime.
@@ -37,12 +38,16 @@ type skeletonBone struct {
 	color    [3]byte
 }
 
+// faceKeypoints are excluded from joint rendering.
+var faceKeypoints = map[string]bool{
+	pose.LandmarkNose:     true,
+	pose.LandmarkLeftEye:  true,
+	pose.LandmarkRightEye: true,
+	pose.LandmarkLeftEar:  true,
+	pose.LandmarkRightEar: true,
+}
+
 var skeletonBones = []skeletonBone{
-	// Head
-	{pose.LandmarkNose, pose.LandmarkLeftEye, colorCenter},
-	{pose.LandmarkNose, pose.LandmarkRightEye, colorCenter},
-	{pose.LandmarkLeftEye, pose.LandmarkLeftEar, colorLeft},
-	{pose.LandmarkRightEye, pose.LandmarkRightEar, colorRight},
 	// Torso
 	{pose.LandmarkLeftShoulder, pose.LandmarkRightShoulder, colorCenter},
 	{pose.LandmarkLeftShoulder, pose.LandmarkLeftHip, colorLeft},
@@ -90,6 +95,9 @@ func (s *SkeletonStage) Run(ctx context.Context, input pipeline.StageInput) (pip
 		logger.Info("keypoints has no frames, skipping skeleton rendering")
 		return pipeline.StageOutput{VideoPath: input.VideoPath}, nil
 	}
+
+	// Smooth keypoints across frames to reduce jitter (7-frame averaging window).
+	smoothKeypoints(&result, skeletonSmoothWindow)
 
 	// Read crop-params.json (optional).
 	var cropParams *CropParams
@@ -161,7 +169,13 @@ func (s *SkeletonStage) Run(ctx context.Context, input pipeline.StageInput) (pip
 		kpFrame := nearestKeypointFrame(kpTimes, result.Frames, kpTimeSec)
 
 		if kpFrame != nil {
-			drawSkeleton(buf, frameW, frameH, kpFrame, cropParams, &result)
+			cp := cropParams
+			if cp != nil && len(cp.Segments) > 0 {
+				frameCp := *cp
+				frameCp.X = cp.CropXAtTime(videoTimeSec)
+				cp = &frameCp
+			}
+			drawSkeleton(buf, frameW, frameH, kpFrame, cp, &result)
 		}
 
 		if _, err := encIn.Write(buf); err != nil {
@@ -262,8 +276,11 @@ func drawSkeleton(buf []byte, frameW, frameH int, frame *pose.Frame, cropParams 
 		drawThickLine(buf, frameW, frameH, x0, y0, x1, y1, bone.color, skeletonBoneThickness)
 	}
 
-	// Draw joints on top of bones.
+	// Draw joints on top of bones (skip face keypoints).
 	for _, kp := range frame.Keypoints {
+		if faceKeypoints[kp.Name] {
+			continue
+		}
 		x, y, visible := toPixel(kp)
 		if !visible {
 			continue
@@ -354,4 +371,50 @@ func abs(x int) int {
 		return -x
 	}
 	return x
+}
+
+// smoothKeypoints applies a moving average to each keypoint's X/Y coordinates
+// across frames to reduce per-frame jitter. Confidence values are left unchanged.
+func smoothKeypoints(result *pose.Result, window int) {
+	if len(result.Frames) < 2 || window < 2 {
+		return
+	}
+
+	// Collect all unique keypoint names in order.
+	var names []string
+	seen := map[string]bool{}
+	for _, kp := range result.Frames[0].Keypoints {
+		if !seen[kp.Name] {
+			names = append(names, kp.Name)
+			seen[kp.Name] = true
+		}
+	}
+
+	n := len(result.Frames)
+	for _, name := range names {
+		xs := make([]float64, n)
+		ys := make([]float64, n)
+		for i, f := range result.Frames {
+			for _, kp := range f.Keypoints {
+				if kp.Name == name {
+					xs[i] = kp.X
+					ys[i] = kp.Y
+					break
+				}
+			}
+		}
+
+		smoothXs := smoothValues(xs, window)
+		smoothYs := smoothValues(ys, window)
+
+		for i := range result.Frames {
+			for j := range result.Frames[i].Keypoints {
+				if result.Frames[i].Keypoints[j].Name == name {
+					result.Frames[i].Keypoints[j].X = smoothXs[i]
+					result.Frames[i].Keypoints[j].Y = smoothYs[i]
+					break
+				}
+			}
+		}
+	}
 }

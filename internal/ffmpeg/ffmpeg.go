@@ -90,6 +90,18 @@ func CropVideo(ctx context.Context, input, output string, x, y, w, h int) error 
 	return err
 }
 
+// CropVideoExpr crops a video using an FFmpeg expression for the X position.
+// This enables dynamic per-frame X positioning (e.g., for hybrid track/lock crop).
+func CropVideoExpr(ctx context.Context, input, output string, xExpr string, y, w, h int) error {
+	filter := fmt.Sprintf("crop=%d:%d:'%s':%d", w, h, xExpr, y)
+	_, _, err := Run(ctx, "-y",
+		"-i", input,
+		"-vf", filter,
+		output,
+	)
+	return err
+}
+
 // ExtractThumbnail extracts a single frame at timeSec as an image.
 func ExtractThumbnail(ctx context.Context, input, output string, timeSec float64) error {
 	_, _, err := Run(ctx, "-y",
