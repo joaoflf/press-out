@@ -95,6 +95,7 @@ func main() {
 	pipelineStages[0] = &stages.PoseStage{ProjectRoot: projectRoot} // Replace stub with real pose stage
 	pipelineStages[1] = &stages.TrimStage{}                         // Replace stub with real trim stage
 	pipelineStages[2] = &stages.CropStage{}                         // Replace stub with real crop stage
+	pipelineStages[3] = &stages.SkeletonStage{}                      // Replace stub with real skeleton stage
 
 	pl := pipeline.New(pipelineStages, broker)
 
