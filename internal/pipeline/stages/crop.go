@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
 	"math"
 	"os"
@@ -119,16 +118,23 @@ func (s *CropStage) Run(ctx context.Context, input pipeline.StageInput) (pipelin
 	// Compute extent-based crop size.
 	cropW, cropH, originY := computeExtentCropRegion(frames, sourceW, sourceH)
 
-	// Compute hybrid per-frame X centers.
-	cxList := computeHybridCenters(frames, sourceW)
+	// Compute static X position: median bbox center X.
+	rawCX := make([]float64, len(frames))
+	for i, f := range frames {
+		rawCX[i] = ((f.BoundingBox.Left + f.BoundingBox.Right) / 2) * float64(sourceW)
+	}
+	cropX := int(math.Round(median(rawCX))) - cropW/2
+	if cropX < 0 {
+		cropX = 0
+	}
+	if cropX+cropW > sourceW {
+		cropX = sourceW - cropW
+	}
 
-	// Convert centers to top-left origins.
-	xs, ys := centersToOrigins(cxList, cropW, sourceW, originY)
-
-	// Write crop-params.json (use first stationary segment's lock X origin).
+	// Write crop-params.json.
 	params := CropParams{
-		X:            xs[0],
-		Y:            ys[0],
+		X:            cropX,
+		Y:            originY,
 		W:            cropW,
 		H:            cropH,
 		SourceWidth:  sourceW,
@@ -145,30 +151,10 @@ func (s *CropStage) Run(ctx context.Context, input pipeline.StageInput) (pipelin
 		return pipeline.StageOutput{}, fmt.Errorf("crop: write params: %w", err)
 	}
 
-	// Get video FPS for frame piping.
-	videoFPS, err := ffmpeg.GetFPS(ctx, input.VideoPath)
-	if err != nil {
-		logger.Warn("failed to get video FPS, falling back to 30", "error", err)
-		videoFPS = 30.0
-	}
-
-	// Build keypoint times for interpolation.
-	kpTimes := make([]float64, len(frames))
-	for i, f := range frames {
-		kpTimes[i] = float64(f.TimeOffsetMs) / 1000.0
-	}
-
-	// Get trim boundaries for frame mapping.
-	trimStart := kpTimes[0]
-	trimEnd := kpTimes[len(kpTimes)-1]
-
-	// Interpolate keypoint-rate positions to video frame rate.
-	positions := interpolateToVideoFrames(kpTimes, xs, ys, videoFPS, trimStart, trimEnd)
-
-	// Per-frame crop via FFmpeg pipe.
+	// Crop via FFmpeg native filter.
 	outputPath := storage.LiftFile(input.DataDir, input.LiftID, storage.FileCropped)
-	if err := cropVideoPerFrame(ctx, input.VideoPath, outputPath, sourceW, sourceH, cropW, cropH, videoFPS, positions); err != nil {
-		logger.Error("ffmpeg per-frame crop failed", "error", err, "duration_ms", time.Since(start).Milliseconds())
+	if err := ffmpeg.CropVideo(ctx, input.VideoPath, outputPath, cropX, originY, cropW, cropH); err != nil {
+		logger.Error("ffmpeg crop failed", "error", err, "duration_ms", time.Since(start).Milliseconds())
 		return pipeline.StageOutput{}, fmt.Errorf("crop: ffmpeg: %w", err)
 	}
 
@@ -177,10 +163,11 @@ func (s *CropStage) Run(ctx context.Context, input pipeline.StageInput) (pipelin
 
 	walkingPct := computeWalkingPercent(frames, sourceW)
 	logger.Info("crop complete",
+		"crop_x", cropX,
+		"crop_y", originY,
 		"crop_w", cropW,
 		"crop_h", cropH,
 		"walking_pct", fmt.Sprintf("%.0f%%", walkingPct*100),
-		"video_frames", len(positions),
 		"duration_ms", time.Since(start).Milliseconds(),
 	)
 
@@ -312,108 +299,6 @@ func minFloat(values []float64) float64 {
 	return m
 }
 
-// computeHybridCenters computes per-frame X center positions using the hybrid algorithm.
-// Stationary frames lock at per-segment median X, walking frames interpolate.
-func computeHybridCenters(frames []pose.Frame, sourceW int) []float64 {
-	sw := float64(sourceW)
-	n := len(frames)
-	if n == 0 {
-		return nil
-	}
-
-	// Pass 1: Compute raw per-frame bbox center X in pixels.
-	rawCX := make([]float64, n)
-	for i, f := range frames {
-		rawCX[i] = ((f.BoundingBox.Left + f.BoundingBox.Right) / 2) * sw
-	}
-
-	// Smooth raw CX.
-	smoothedCX := smoothValues(rawCX, trackingSmoothFrames)
-
-	// Compute X velocity (absolute difference of smoothed CX).
-	xVel := make([]float64, n)
-	for i := 1; i < n; i++ {
-		xVel[i] = math.Abs(smoothedCX[i] - smoothedCX[i-1])
-	}
-
-	// Smooth velocity.
-	smoothedVel := smoothValues(xVel, hybridVelSmoothFrames)
-
-	// Classify: walking if velocity > threshold.
-	isWalking := make([]bool, n)
-	for i := range smoothedVel {
-		isWalking[i] = smoothedVel[i] > hybridXVelThreshold
-	}
-
-	// Pass 2: Find contiguous segments and compute lock points.
-	type segment struct {
-		start, end int
-		walking    bool
-		lockX      float64
-	}
-	var segments []segment
-	segStart := 0
-	for i := 1; i <= n; i++ {
-		if i == n || isWalking[i] != isWalking[segStart] {
-			seg := segment{start: segStart, end: i, walking: isWalking[segStart]}
-			if !seg.walking {
-				// Compute median raw CX for this stationary segment.
-				vals := make([]float64, seg.end-seg.start)
-				for j := seg.start; j < seg.end; j++ {
-					vals[j-seg.start] = rawCX[j]
-				}
-				seg.lockX = median(vals)
-			}
-			segments = append(segments, seg)
-			segStart = i
-		}
-	}
-
-	// Pass 3: Assign X positions.
-	cxList := make([]float64, n)
-	for si, seg := range segments {
-		if !seg.walking {
-			for i := seg.start; i < seg.end; i++ {
-				cxList[i] = seg.lockX
-			}
-		} else {
-			// Find adjacent stationary segments.
-			var prevLock, nextLock float64
-			hasPrev, hasNext := false, false
-			for pi := si - 1; pi >= 0; pi-- {
-				if !segments[pi].walking {
-					prevLock = segments[pi].lockX
-					hasPrev = true
-					break
-				}
-			}
-			for ni := si + 1; ni < len(segments); ni++ {
-				if !segments[ni].walking {
-					nextLock = segments[ni].lockX
-					hasNext = true
-					break
-				}
-			}
-
-			for i := seg.start; i < seg.end; i++ {
-				if hasPrev && hasNext {
-					// Linear interpolation.
-					t := float64(i-seg.start) / float64(seg.end-seg.start)
-					cxList[i] = prevLock + t*(nextLock-prevLock)
-				} else if hasPrev {
-					cxList[i] = prevLock
-				} else if hasNext {
-					cxList[i] = nextLock
-				} else {
-					// No adjacent locks — fallback to smoothed tracking.
-					cxList[i] = smoothedCX[i]
-				}
-			}
-		}
-	}
-
-	return cxList
-}
 
 // computeWalkingPercent returns the fraction of frames classified as walking.
 func computeWalkingPercent(frames []pose.Frame, sourceW int) float64 {
@@ -444,149 +329,3 @@ func computeWalkingPercent(frames []pose.Frame, sourceW int) float64 {
 	return float64(walkCount) / float64(n)
 }
 
-// centersToOrigins converts per-frame X centers to top-left crop origins, clamped to frame.
-func centersToOrigins(cxList []float64, cropW, sourceW int, originY int) (xs, ys []int) {
-	xs = make([]int, len(cxList))
-	ys = make([]int, len(cxList))
-	for i, cx := range cxList {
-		x := int(math.Round(cx)) - cropW/2
-		if x < 0 {
-			x = 0
-		}
-		if x+cropW > sourceW {
-			x = sourceW - cropW
-		}
-		if x < 0 {
-			x = 0
-		}
-		xs[i] = x
-		ys[i] = originY
-	}
-	return xs, ys
-}
-
-// interpolateToVideoFrames interpolates keypoint-rate positions to video frame rate.
-func interpolateToVideoFrames(kpTimes []float64, kpXs, kpYs []int, videoFPS, trimStart, trimEnd float64) [][2]int {
-	if len(kpTimes) == 0 {
-		return nil
-	}
-
-	totalDuration := trimEnd - trimStart
-	totalVideoFrames := int(math.Round(totalDuration * videoFPS))
-	if totalVideoFrames < 1 {
-		totalVideoFrames = 1
-	}
-
-	positions := make([][2]int, totalVideoFrames)
-	for vi := 0; vi < totalVideoFrames; vi++ {
-		t := trimStart + float64(vi)/videoFPS
-
-		// Find bracketing keypoint frames.
-		idx := sort.SearchFloat64s(kpTimes, t)
-		if idx == 0 {
-			positions[vi] = [2]int{kpXs[0], kpYs[0]}
-		} else if idx >= len(kpTimes) {
-			positions[vi] = [2]int{kpXs[len(kpXs)-1], kpYs[len(kpYs)-1]}
-		} else {
-			// Linear interpolation between bracketing keypoints.
-			t0 := kpTimes[idx-1]
-			t1 := kpTimes[idx]
-			dt := t1 - t0
-			if dt < 1e-9 {
-				positions[vi] = [2]int{kpXs[idx], kpYs[idx]}
-			} else {
-				frac := (t - t0) / dt
-				x := float64(kpXs[idx-1]) + frac*float64(kpXs[idx]-kpXs[idx-1])
-				y := float64(kpYs[idx-1]) + frac*float64(kpYs[idx]-kpYs[idx-1])
-				positions[vi] = [2]int{int(math.Round(x)), int(math.Round(y))}
-			}
-		}
-	}
-
-	return positions
-}
-
-// cropVideoPerFrame performs per-frame crop via FFmpeg decode/encode pipes.
-func cropVideoPerFrame(ctx context.Context, input, output string, sourceW, sourceH, cropW, cropH int, fps float64, positions [][2]int) error {
-	frameSize := sourceW * sourceH * 3
-	cropFrameSize := cropW * cropH * 3
-
-	decCmd, decOut, err := ffmpeg.DecodeFrames(ctx, input)
-	if err != nil {
-		return fmt.Errorf("start decode: %w", err)
-	}
-
-	encCmd, encIn, err := ffmpeg.EncodeFrames(ctx, output, cropW, cropH, fps)
-	if err != nil {
-		decCmd.Process.Kill()
-		decCmd.Wait()
-		return fmt.Errorf("start encode: %w", err)
-	}
-
-	srcBuf := make([]byte, frameSize)
-	cropBuf := make([]byte, cropFrameSize)
-
-	frameIdx := 0
-	for {
-		// Read one full source frame.
-		_, err := io.ReadFull(decOut, srcBuf)
-		if err != nil {
-			break // EOF or error — done reading
-		}
-
-		// Determine crop position for this frame.
-		var cx, cy int
-		if frameIdx < len(positions) {
-			cx = positions[frameIdx][0]
-			cy = positions[frameIdx][1]
-		} else if len(positions) > 0 {
-			// Hold last position for any extra frames.
-			cx = positions[len(positions)-1][0]
-			cy = positions[len(positions)-1][1]
-		}
-
-		// Clamp.
-		if cx < 0 {
-			cx = 0
-		}
-		if cy < 0 {
-			cy = 0
-		}
-		if cx+cropW > sourceW {
-			cx = sourceW - cropW
-		}
-		if cy+cropH > sourceH {
-			cy = sourceH - cropH
-		}
-
-		// Crop: extract rectangle from source frame.
-		for row := 0; row < cropH; row++ {
-			srcOffset := ((cy+row)*sourceW + cx) * 3
-			dstOffset := row * cropW * 3
-			copy(cropBuf[dstOffset:dstOffset+cropW*3], srcBuf[srcOffset:srcOffset+cropW*3])
-		}
-
-		if _, err := encIn.Write(cropBuf); err != nil {
-			break
-		}
-
-		frameIdx++
-	}
-
-	// Clean up pipes and wait for processes.
-	encIn.Close()
-	encErr := encCmd.Wait()
-	decOut.Close()
-	decErr := decCmd.Wait()
-
-	if decErr != nil {
-		return fmt.Errorf("decode: %w", decErr)
-	}
-	if encErr != nil {
-		return fmt.Errorf("encode: %w", encErr)
-	}
-	if frameIdx == 0 {
-		return fmt.Errorf("decode: no frames read from input")
-	}
-	return nil
-}

@@ -327,8 +327,8 @@ func TestComputeExtentCropRegion(t *testing.T) {
 	t.Logf("crop region: w=%d h=%d originY=%d", w, h, originY)
 }
 
-func TestComputeHybridCenters_Stationary(t *testing.T) {
-	// All frames at same position — should produce 0% walking and single lock.
+func TestComputeWalkingPercent_Stationary(t *testing.T) {
+	// All frames at same position — should produce 0% walking.
 	frames := make([]pose.Frame, 60) // ~2s at 30fps
 	for i := range frames {
 		frames[i] = pose.Frame{
@@ -337,95 +337,9 @@ func TestComputeHybridCenters_Stationary(t *testing.T) {
 		}
 	}
 
-	sourceW := 1080
-	cxList := computeHybridCenters(frames, sourceW)
-	if len(cxList) != len(frames) {
-		t.Fatalf("expected %d centers, got %d", len(frames), len(cxList))
-	}
-
-	// All centers should be at the same position (median of constant).
-	expected := 0.5 * float64(sourceW) // (0.4+0.6)/2 * 1080 = 540
-	for i, cx := range cxList {
-		if math.Abs(cx-expected) > 1 {
-			t.Errorf("frame %d: cx=%.1f, want ~%.1f", i, cx, expected)
-			break
-		}
-	}
-
-	// Walking percent should be 0.
-	wp := computeWalkingPercent(frames, sourceW)
+	wp := computeWalkingPercent(frames, 1080)
 	if wp > 0.01 {
 		t.Errorf("walking percent = %.1f%%, want 0%%", wp*100)
-	}
-}
-
-func TestComputeHybridCenters_WithWalk(t *testing.T) {
-	// Simulate CJ: stationary at x=0.45, walk to x=0.25, stationary at x=0.25.
-	frames := make([]pose.Frame, 0, 90)
-
-	// First segment: stationary at x=0.45 (30 frames)
-	for i := 0; i < 30; i++ {
-		frames = append(frames, pose.Frame{
-			TimeOffsetMs: int64(i * 33),
-			BoundingBox:  pose.BoundingBox{Left: 0.35, Top: 0.2, Right: 0.55, Bottom: 0.8},
-		})
-	}
-
-	// Walking transition (15 frames) - gradual shift from 0.45 to 0.25
-	for i := 0; i < 15; i++ {
-		t := float64(i) / 14.0
-		cx := 0.45 - t*0.20
-		hw := 0.10
-		frames = append(frames, pose.Frame{
-			TimeOffsetMs: int64((30 + i) * 33),
-			BoundingBox:  pose.BoundingBox{Left: cx - hw, Top: 0.2, Right: cx + hw, Bottom: 0.8},
-		})
-	}
-
-	// Second segment: stationary at x=0.25 (45 frames)
-	for i := 0; i < 45; i++ {
-		frames = append(frames, pose.Frame{
-			TimeOffsetMs: int64((45 + i) * 33),
-			BoundingBox:  pose.BoundingBox{Left: 0.15, Top: 0.2, Right: 0.35, Bottom: 0.8},
-		})
-	}
-
-	sourceW := 1080
-	cxList := computeHybridCenters(frames, sourceW)
-	if len(cxList) != len(frames) {
-		t.Fatalf("expected %d centers, got %d", len(frames), len(cxList))
-	}
-
-	// First segment should be locked near 0.45*1080 = 486.
-	firstLock := cxList[0]
-	t.Logf("first lock: %.1f", firstLock)
-
-	// Last segment should be locked near 0.25*1080 = 270.
-	lastLock := cxList[len(cxList)-1]
-	t.Logf("last lock: %.1f", lastLock)
-
-	// They should be different (walk detected).
-	if math.Abs(firstLock-lastLock) < 50 {
-		t.Errorf("expected different lock positions: first=%.1f, last=%.1f", firstLock, lastLock)
-	}
-
-	// Walking frames in the middle should be interpolated.
-	midIdx := 37 // middle of walking segment
-	if midIdx < len(cxList) {
-		midCX := cxList[midIdx]
-		// Should be between the two lock positions.
-		lo := math.Min(firstLock, lastLock)
-		hi := math.Max(firstLock, lastLock)
-		if midCX < lo-10 || midCX > hi+10 {
-			t.Errorf("walking frame %d cx=%.1f not between locks [%.1f, %.1f]", midIdx, midCX, lo, hi)
-		}
-	}
-
-	// Walking percent should be > 0%.
-	wp := computeWalkingPercent(frames, sourceW)
-	t.Logf("walking percent: %.1f%%", wp*100)
-	if wp < 0.01 {
-		t.Error("expected some walking frames detected")
 	}
 }
 
@@ -462,72 +376,6 @@ func TestPercentile(t *testing.T) {
 	p50 := percentile(values, 50)
 	if math.Abs(p50-55) > 1.0 {
 		t.Errorf("percentile(values, 50) = %.1f, want ~55", p50)
-	}
-}
-
-func TestCentersToOrigins(t *testing.T) {
-	cxList := []float64{500, 600, 100}
-	cropW := 200
-	sourceW := 800
-
-	xs, ys := centersToOrigins(cxList, cropW, sourceW, 50)
-
-	// cx=500, origin = 500-100 = 400
-	if xs[0] != 400 {
-		t.Errorf("xs[0] = %d, want 400", xs[0])
-	}
-	// cx=600, origin = 600-100 = 500
-	if xs[1] != 500 {
-		t.Errorf("xs[1] = %d, want 500", xs[1])
-	}
-	// cx=100, origin = 100-100 = 0 (clamped)
-	if xs[2] != 0 {
-		t.Errorf("xs[2] = %d, want 0", xs[2])
-	}
-	// All Y should be originY.
-	for i, y := range ys {
-		if y != 50 {
-			t.Errorf("ys[%d] = %d, want 50", i, y)
-		}
-	}
-}
-
-func TestCentersToOrigins_ClampRight(t *testing.T) {
-	cxList := []float64{750}
-	cropW := 200
-	sourceW := 800
-
-	xs, _ := centersToOrigins(cxList, cropW, sourceW, 0)
-
-	// cx=750, origin = 750-100 = 650, but 650+200=850 > 800, so clamp to 600.
-	if xs[0] != 600 {
-		t.Errorf("xs[0] = %d, want 600", xs[0])
-	}
-}
-
-func TestInterpolateToVideoFrames(t *testing.T) {
-	kpTimes := []float64{0.0, 0.5, 1.0}
-	kpXs := []int{100, 200, 300}
-	kpYs := []int{50, 50, 50}
-
-	positions := interpolateToVideoFrames(kpTimes, kpXs, kpYs, 10.0, 0.0, 1.0)
-
-	// 10fps over 1s = 10 frames
-	if len(positions) != 10 {
-		t.Fatalf("expected 10 positions, got %d", len(positions))
-	}
-
-	// Frame 0 at t=0.0: x=100
-	if positions[0][0] != 100 {
-		t.Errorf("frame 0 x=%d, want 100", positions[0][0])
-	}
-	// Frame 5 at t=0.5: x=200
-	if positions[5][0] != 200 {
-		t.Errorf("frame 5 x=%d, want 200", positions[5][0])
-	}
-	// Frame 9 at t=0.9: between 200 and 300.
-	if positions[9][0] < 200 || positions[9][0] > 300 {
-		t.Errorf("frame 9 x=%d, want between 200-300", positions[9][0])
 	}
 }
 
