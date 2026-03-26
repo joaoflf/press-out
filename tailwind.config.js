@@ -1,9 +1,14 @@
 /** @type {import('tailwindcss').Config} */
 module.exports = {
-  content: ["./web/templates/**/*.html", "./internal/pipeline/pipeline.go"],
+  content: ["./web/templates/**/*.html", "./web/static/**/*.js", "./internal/pipeline/pipeline.go"],
   theme: {
     fontFamily: {
       sans: ['-apple-system', 'BlinkMacSystemFont', '"Segoe UI"', 'system-ui', 'sans-serif'],
+    },
+    extend: {
+      colors: {
+        sage: '#8BA888',
+      },
     },
   },
   plugins: [require("daisyui")],
