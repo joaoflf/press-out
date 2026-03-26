@@ -4,8 +4,24 @@
 <div class="max-w-[430px] mx-auto">
     {{template "video-player" .}}
 
-    <div class="p-4 flex flex-col gap-4">
-        <div class="flex items-center gap-3">
+    {{if .Processing}}
+    <div class="px-4 pt-6 pb-4" hx-ext="sse" sse-connect="/lifts/{{.ID}}/events" sse-close="pipeline-done">
+        <div class="flex items-center gap-3 mb-1">
+            <a href="/" class="flex items-center justify-center w-11 h-11 -ml-2" aria-label="Back to lift list">
+                <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="#2D2D2D" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" />
+                </svg>
+            </a>
+            <div>
+                <h1 class="text-base font-semibold">Processing {{.DisplayType}}</h1>
+                <p class="text-xs text-base-content/40">{{.DisplayDate}}</p>
+            </div>
+        </div>
+        {{template "pipeline-stages" .}}
+    </div>
+    {{else}}
+    <div class="p-3 flex flex-col gap-0">
+        <div class="flex items-center gap-3 mb-2.5">
             <a href="/" class="flex items-center justify-center w-11 h-11 -ml-2" aria-label="Back to lift list">
                 <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="#2D2D2D" stroke-width="2">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" />
@@ -17,13 +33,29 @@
             </div>
         </div>
 
-        {{if .Processing}}
-        <div hx-ext="sse" sse-connect="/lifts/{{.ID}}/events" sse-close="pipeline-done">
-            {{template "pipeline-stages" .}}
+        <div class="bg-white rounded-xl p-3.5 mb-2.5 shadow-[0_1px_3px_rgba(0,0,0,0.04)] section-card">
+            <div class="text-[11px] font-semibold text-[#C4BFAE] uppercase tracking-wider mb-2.5">Playback</div>
+            <div class="flex gap-1.5">
+                <button type="button" class="speed-btn flex-1 py-2.5 text-[13px] font-medium bg-[#EDEDEA] border-0 rounded-lg cursor-pointer text-base-content" data-speed="0.25">0.25x</button>
+                <button type="button" class="speed-btn flex-1 py-2.5 text-[13px] font-medium bg-[#EDEDEA] border-0 rounded-lg cursor-pointer text-base-content" data-speed="0.5">0.5x</button>
+                <button type="button" class="speed-btn flex-1 py-2.5 text-[13px] font-medium bg-[#EDEDEA] border-0 rounded-lg cursor-pointer text-base-content" data-speed="1">1x</button>
+            </div>
+            {{if .HasSkeleton}}
+            <div class="flex items-center justify-between mt-3 pt-3 border-t border-[#EDEDEA]">
+                <span class="text-sm text-base-content">Skeleton overlay</span>
+                <span id="mode-badge" class="text-sm font-medium text-[#8BA888] cursor-pointer" data-toggle-video>Skeleton</span>
+            </div>
+            {{end}}
         </div>
-        {{else}}
+
+        <div id="coaching-section"></div>
+
+        <div id="phase-timeline-section"></div>
+
+        <div id="metrics-section"></div>
+
         <button
-            class="btn h-10 bg-transparent border-none shadow-none text-base-content/60 hover:text-sage gap-2"
+            class="btn h-10 bg-transparent border-none shadow-none text-base-content/60 hover:text-sage gap-2 mt-2.5"
             hx-post="/lifts/{{.ID}}/reprocess"
             hx-on::after-request="window.location.reload()"
             aria-label="Re-process lift"
@@ -33,15 +65,8 @@
             </svg>
             Re-process
         </button>
-        {{end}}
 
-        <div id="coaching-section"></div>
-
-        <div id="phase-timeline-section"></div>
-
-        <div id="metrics-section"></div>
-
-        <div class="pt-4 border-t border-base-300">
+        <div class="pt-4 border-t border-base-300 mt-2.5">
             <button
                 class="btn btn-ghost btn-sm text-error"
                 hx-delete="/lifts/{{.ID}}"
@@ -55,5 +80,6 @@
             </button>
         </div>
     </div>
+    {{end}}
 </div>
 {{end}}

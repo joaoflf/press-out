@@ -7,30 +7,41 @@ document.addEventListener("DOMContentLoaded", function () {
     var speedBtns = document.querySelectorAll(".speed-btn");
 
     // Toggle handler (skeleton <-> clean)
+    function toggleVideo() {
+      var time = video.currentTime;
+      var rate = video.playbackRate;
+      var wasPaused = video.paused;
+
+      video.src = isSkeleton ? video.dataset.cleanSrc : video.dataset.skeletonSrc;
+      isSkeleton = !isSkeleton;
+
+      video.addEventListener("loadedmetadata", function () {
+        video.currentTime = time;
+        video.playbackRate = rate;
+        if (!wasPaused) video.play();
+      }, {once: true});
+
+      video.load();
+
+      if (badge) {
+        badge.textContent = isSkeleton ? "Skeleton" : "Clean";
+      }
+    }
+
+    var isSkeleton = true;
+
     if (overlay && video.dataset.skeletonSrc && video.dataset.cleanSrc) {
-      var isSkeleton = true;
       overlay.addEventListener("click", function (e) {
         e.preventDefault();
         e.stopPropagation();
+        toggleVideo();
+      });
+    }
 
-        var time = video.currentTime;
-        var rate = video.playbackRate;
-        var wasPaused = video.paused;
-
-        video.src = isSkeleton ? video.dataset.cleanSrc : video.dataset.skeletonSrc;
-        isSkeleton = !isSkeleton;
-
-        video.addEventListener("loadedmetadata", function () {
-          video.currentTime = time;
-          video.playbackRate = rate;
-          if (!wasPaused) video.play();
-        }, {once: true});
-
-        video.load();
-
-        if (badge) {
-          badge.textContent = isSkeleton ? "Skeleton" : "Clean";
-        }
+    // Badge in Playback card also toggles
+    if (badge && video.dataset.skeletonSrc && video.dataset.cleanSrc) {
+      badge.addEventListener("click", function () {
+        toggleVideo();
       });
     }
 
@@ -41,11 +52,11 @@ document.addEventListener("DOMContentLoaded", function () {
         video.playbackRate = speed;
 
         for (var j = 0; j < speedBtns.length; j++) {
-          speedBtns[j].classList.remove("text-[#8BA888]");
-          speedBtns[j].classList.add("text-white/80");
+          speedBtns[j].classList.remove("bg-[#8BA888]", "text-white");
+          speedBtns[j].classList.add("bg-[#EDEDEA]", "text-base-content");
         }
-        this.classList.remove("text-white/80");
-        this.classList.add("text-[#8BA888]");
+        this.classList.remove("bg-[#EDEDEA]", "text-base-content");
+        this.classList.add("bg-[#8BA888]", "text-white");
       });
     }
   }

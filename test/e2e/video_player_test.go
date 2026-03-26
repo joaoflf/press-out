@@ -108,30 +108,35 @@ func TestVideoPlayer_NoBadgeWithoutSkeleton(t *testing.T) {
 	}
 }
 
-func TestVideoPlayer_GradientBackdrop(t *testing.T) {
+func TestVideoPlayer_PlaybackCard(t *testing.T) {
 	env := startTestEnv(t)
 	liftID := createTestLift(t, env, "snatch", "2026-03-15T10:00:00Z")
 
 	ctx, _ := newBrowserCtx(t)
 
-	var hasGradient bool
+	var hasCard bool
+	var titleText string
 	err := chromedp.Run(ctx,
 		chromedp.Navigate(fmt.Sprintf("%s/lifts/%d", env.BaseURL, liftID)),
 		chromedp.WaitReady("body"),
+		chromedp.Evaluate(`document.querySelector('.section-card') !== null`, &hasCard),
 		chromedp.Evaluate(`
 			(function() {
-				var el = document.querySelector('.bg-gradient-to-t');
-				if (!el) return false;
-				var bg = window.getComputedStyle(el).backgroundImage;
-				return bg.indexOf('gradient') >= 0;
+				var card = document.querySelector('.section-card');
+				if (!card) return '';
+				var title = card.querySelector('.uppercase');
+				return title ? title.textContent.trim() : '';
 			})()
-		`, &hasGradient),
+		`, &titleText),
 	)
 	if err != nil {
 		t.Fatalf("chromedp: %v", err)
 	}
-	if !hasGradient {
-		t.Error("speed strip gradient backdrop not found")
+	if !hasCard {
+		t.Error("playback card not found")
+	}
+	if titleText != "Playback" {
+		t.Errorf("card title=%q, want %q", titleText, "Playback")
 	}
 }
 

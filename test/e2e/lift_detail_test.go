@@ -14,6 +14,7 @@ import (
 
 	_ "github.com/mattn/go-sqlite3"
 	"press-out/internal/handler"
+	"press-out/internal/sse"
 	"press-out/internal/storage"
 	"press-out/internal/storage/sqlc"
 )
@@ -23,6 +24,7 @@ type testEnv struct {
 	BaseURL string
 	Queries *sqlc.Queries
 	DataDir string
+	Broker  *sse.Broker
 }
 
 // startTestEnv is like startServer but also exposes Queries and DataDir.
@@ -126,6 +128,93 @@ func createTestLift(t *testing.T, env testEnv, liftType, createdAt string) int64
 		t.Fatalf("WriteFile: %v", err)
 	}
 	return lift.ID
+}
+
+// startTestEnvWithBroker creates a test environment with an SSE broker,
+// allowing tests to simulate processing lifts.
+func startTestEnvWithBroker(t *testing.T) testEnv {
+	t.Helper()
+
+	root := projectRoot(t)
+
+	origDir, _ := os.Getwd()
+	if err := os.Chdir(root); err != nil {
+		t.Fatalf("chdir to project root: %v", err)
+	}
+	t.Cleanup(func() { os.Chdir(origDir) })
+
+	cssPath := filepath.Join(root, "web", "static", "output.css")
+	if _, err := os.Stat(cssPath); os.IsNotExist(err) {
+		t.Fatal("web/static/output.css not found — run 'make tailwind-build' first")
+	}
+
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+	db, err := storage.NewDB(dbPath)
+	if err != nil {
+		t.Fatalf("NewDB: %v", err)
+	}
+	t.Cleanup(func() { db.Close() })
+
+	if err := storage.RunMigrations(db, filepath.Join(root, "sql", "schema")); err != nil {
+		t.Fatalf("RunMigrations: %v", err)
+	}
+
+	queries := sqlc.New(db)
+
+	base, err := template.ParseGlob(filepath.Join(root, "web", "templates", "layouts", "*.html"))
+	if err != nil {
+		t.Fatalf("parse layouts: %v", err)
+	}
+	if partials, _ := filepath.Glob(filepath.Join(root, "web", "templates", "partials", "*.html")); len(partials) > 0 {
+		base, err = base.ParseGlob(filepath.Join(root, "web", "templates", "partials", "*.html"))
+		if err != nil {
+			t.Fatalf("parse partials: %v", err)
+		}
+	}
+
+	pages, err := filepath.Glob(filepath.Join(root, "web", "templates", "pages", "*.html"))
+	if err != nil {
+		t.Fatalf("glob pages: %v", err)
+	}
+	tmplMap := make(map[string]*template.Template, len(pages))
+	for _, page := range pages {
+		name := filepath.Base(page)
+		clone, err := base.Clone()
+		if err != nil {
+			t.Fatalf("clone base for %s: %v", name, err)
+		}
+		tmplMap[name], err = clone.ParseFiles(page)
+		if err != nil {
+			t.Fatalf("parse page %s: %v", name, err)
+		}
+	}
+
+	broker := sse.NewBroker()
+	srv := &handler.Server{
+		Queries:   queries,
+		Templates: tmplMap,
+		DataDir:   tmpDir,
+		Broker:    broker,
+	}
+
+	mux := http.NewServeMux()
+	srv.RegisterRoutes(mux)
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	server := &http.Server{Handler: mux}
+	go server.Serve(ln)
+	t.Cleanup(func() { server.Close() })
+
+	return testEnv{
+		BaseURL: fmt.Sprintf("http://%s", ln.Addr().String()),
+		Queries: queries,
+		DataDir: tmpDir,
+		Broker:  broker,
+	}
 }
 
 func TestLiftDetail_PageLoads(t *testing.T) {

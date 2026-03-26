@@ -100,28 +100,37 @@ func (p *Pipeline) emitEvents(liftID int64, states []StageState) {
 // RenderStagesHTML builds the full pipeline checklist HTML for the detail page.
 func RenderStagesHTML(stages []Stage, states []StageState) string {
 	var b strings.Builder
-	b.WriteString(`<div class="flex flex-col gap-3">`)
+	last := len(stages) - 1
+	b.WriteString(`<div class="flex flex-col">`)
 	for i, stage := range stages {
 		state := states[i]
-		b.WriteString(`<div class="flex items-center gap-3">`)
+
+		border := ` border-b border-[#EDEDEA]`
+		if i == last {
+			border = ""
+		}
+		b.WriteString(fmt.Sprintf(`<div class="flex items-center gap-3 py-3.5%s">`, border))
 
 		switch state {
 		case StateComplete:
-			b.WriteString(`<div class="w-6 h-6 rounded-full bg-success flex items-center justify-center flex-shrink-0">`)
-			b.WriteString(`<svg class="w-3.5 h-3.5 text-success-content" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3">`)
+			b.WriteString(`<div class="w-7 h-7 rounded-full bg-[#7DA67D] flex items-center justify-center flex-shrink-0">`)
+			b.WriteString(`<svg class="w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3">`)
 			b.WriteString(`<path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg></div>`)
-			b.WriteString(fmt.Sprintf(`<span class="text-sm">%s</span>`, stage.Name()))
+			b.WriteString(fmt.Sprintf(`<span class="text-sm font-medium">%s</span>`, stage.Name()))
 		case StateActive:
-			b.WriteString(`<span class="loading loading-spinner loading-sm text-primary flex-shrink-0"></span>`)
-			b.WriteString(fmt.Sprintf(`<span class="text-sm font-medium text-primary">%s</span>`, stage.Name()))
+			b.WriteString(`<div class="w-7 h-7 rounded-full bg-[#8BA888] flex items-center justify-center flex-shrink-0 animate-pulse">`)
+			b.WriteString(`<div class="w-2 h-2 rounded-full bg-white"></div></div>`)
+			b.WriteString(fmt.Sprintf(`<span class="text-sm font-medium text-[#8BA888]">%s</span>`, stage.Name()))
 		case StateSkipped:
-			b.WriteString(`<div class="w-6 h-6 rounded-full bg-warning flex items-center justify-center flex-shrink-0">`)
-			b.WriteString(`<svg class="w-3.5 h-3.5 text-warning-content" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">`)
-			b.WriteString(`<path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01"/></svg></div>`)
-			b.WriteString(fmt.Sprintf(`<span class="text-sm text-base-content/50">%s</span>`, stage.Name()))
+			b.WriteString(`<div class="w-7 h-7 rounded-full bg-[#EDEDEA] flex items-center justify-center flex-shrink-0">`)
+			b.WriteString(`<svg class="w-3.5 h-3.5 text-[#C4BFAE]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">`)
+			b.WriteString(`<path stroke-linecap="round" stroke-linejoin="round" d="M5 12h14"/></svg></div>`)
+			b.WriteString(fmt.Sprintf(`<span class="text-sm text-[#C4BFAE]">%s</span>`, stage.Name()))
 		default: // pending
-			b.WriteString(`<div class="w-6 h-6 rounded-full border-2 border-base-content/20 flex-shrink-0"></div>`)
-			b.WriteString(fmt.Sprintf(`<span class="text-sm text-base-content/40">%s</span>`, stage.Name()))
+			b.WriteString(`<div class="w-7 h-7 rounded-full bg-[#EDEDEA] flex items-center justify-center flex-shrink-0">`)
+			b.WriteString(`<svg class="w-3.5 h-3.5 text-[#C4BFAE]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">`)
+			b.WriteString(`<circle cx="12" cy="12" r="8"/></svg></div>`)
+			b.WriteString(fmt.Sprintf(`<span class="text-sm text-[#C4BFAE]">%s</span>`, stage.Name()))
 		}
 
 		b.WriteString(`</div>`)

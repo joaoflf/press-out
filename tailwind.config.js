@@ -1,6 +1,6 @@
 /** @type {import('tailwindcss').Config} */
 module.exports = {
-  content: ["./web/templates/**/*.html"],
+  content: ["./web/templates/**/*.html", "./internal/pipeline/pipeline.go"],
   theme: {
     fontFamily: {
       sans: ['-apple-system', 'BlinkMacSystemFont', '"Segoe UI"', 'system-ui', 'sans-serif'],

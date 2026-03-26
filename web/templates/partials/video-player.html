@@ -7,17 +7,7 @@
         {{if .HasSkeleton}}data-skeleton-src="{{.SkeletonSrc}}" data-clean-src="{{.CleanSrc}}"{{end}}>
     </video>
     {{if .HasSkeleton}}
-    <div id="video-toggle-overlay" class="absolute top-0 left-0 right-0 bottom-[60px] z-10 cursor-pointer"></div>
-    <div class="absolute bottom-[44px] right-2 z-20">
-        <span id="mode-badge" class="badge badge-sm bg-black/60 text-white border-0">Skeleton</span>
-    </div>
+    <div id="video-toggle-overlay" class="absolute top-0 left-0 right-0 bottom-0 z-10 cursor-pointer"></div>
     {{end}}
-    <div class="absolute bottom-0 left-0 right-0 z-20 bg-gradient-to-t from-black/40 to-transparent pt-6 pb-1 pointer-events-none">
-        <div class="flex justify-center gap-4 pointer-events-auto">
-            <button type="button" class="speed-btn h-10 px-3 text-sm font-medium text-white/80 bg-transparent border-0 cursor-pointer" data-speed="0.25">0.25x</button>
-            <button type="button" class="speed-btn h-10 px-3 text-sm font-medium text-white/80 bg-transparent border-0 cursor-pointer" data-speed="0.5">0.5x</button>
-            <button type="button" class="speed-btn h-10 px-3 text-sm font-medium text-white/80 bg-transparent border-0 cursor-pointer" data-speed="1">1x</button>
-        </div>
-    </div>
 </div>
 {{end}}

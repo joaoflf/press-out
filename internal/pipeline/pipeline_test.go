@@ -142,8 +142,8 @@ func TestPipelineStageError(t *testing.T) {
 			lastStages = e.Data
 		}
 	}
-	if !strings.Contains(lastStages, "bg-warning") {
-		t.Error("expected skipped stage indicator (bg-warning) in final stages HTML")
+	if !strings.Contains(lastStages, `d="M5 12h14"`) {
+		t.Error("expected skipped stage indicator (dash icon) in final stages HTML")
 	}
 }
 
@@ -199,11 +199,11 @@ func TestRenderStagesHTML(t *testing.T) {
 
 	html := RenderStagesHTML(stages, states)
 
-	if !strings.Contains(html, "bg-success") {
-		t.Error("expected complete stage indicator")
+	if !strings.Contains(html, "bg-[#7DA67D]") {
+		t.Error("expected complete stage indicator (green circle)")
 	}
-	if !strings.Contains(html, "loading-spinner") {
-		t.Error("expected active stage spinner")
+	if !strings.Contains(html, "animate-pulse") {
+		t.Error("expected active stage pulse animation")
 	}
 	if !strings.Contains(html, "Pose estimation") {
 		t.Error("expected stage name 'Pose estimation'")
