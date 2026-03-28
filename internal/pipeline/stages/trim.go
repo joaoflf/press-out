@@ -16,8 +16,9 @@ import (
 )
 
 const (
-	trimMinKeypointConfidence = 0.5
-	trimSmoothWindow          = 7
+	trimMinKeypointConfidence  = 0.5
+	trimMinKeypointsPerFrame   = 3 // require at least 3 confident keypoint pairs
+	trimSmoothWindow           = 7
 	trimMinWinSec             = 5.0  // wider min to capture CJ's clean+walk+jerk
 	trimMaxWinSec             = 12.0
 	trimWinStepSec            = 0.5
@@ -197,13 +198,16 @@ func detectLiftDensityBridged(keypointsPath string) (startSec, endSec float64, c
 	// After a jerk catch, the lifter is in a split stance. Extend end until feet converge.
 	endFrame := bestEnd
 	lookAheadFrames := int(0.5 * fps)
-	scanStart := endFrame
+	scanStart := endFrame - 2
+	if scanStart < 0 {
+		scanStart = 0
+	}
 	scanEnd := endFrame + lookAheadFrames
 	if scanEnd > len(result.Frames)-1 {
 		scanEnd = len(result.Frames) - 1
 	}
 
-	// Check ankle gap at/near window end.
+	// Check ankle gap at/near window end (look back 2 frames + forward 0.5s).
 	var maxGapNearEnd float64
 	for fi := scanStart; fi <= scanEnd && fi < len(result.Frames); fi++ {
 		gap, ok := getAnkleGap(result.Frames[fi])
@@ -225,7 +229,12 @@ func detectLiftDensityBridged(keypointsPath string) (startSec, endSec float64, c
 		for fi := endFrame; fi <= recoveryLimit; fi++ {
 			gap, ok := getAnkleGap(result.Frames[fi])
 			if !ok {
-				rawGaps = append(rawGaps, maxGapNearEnd) // carry forward last known
+				// Carry forward last known gap, or 0.0 if none yet.
+				if len(rawGaps) > 0 {
+					rawGaps = append(rawGaps, rawGaps[len(rawGaps)-1])
+				} else {
+					rawGaps = append(rawGaps, 0.0)
+				}
 			} else {
 				rawGaps = append(rawGaps, gap)
 			}
@@ -311,7 +320,7 @@ func computeMotionDiversity(frames []pose.Frame) []float64 {
 			disps = append(disps, vec{dx: kp.X - prev.X, dy: kp.Y - prev.Y})
 		}
 
-		if len(disps) == 0 {
+		if len(disps) < trimMinKeypointsPerFrame {
 			continue
 		}
 

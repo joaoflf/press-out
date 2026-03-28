@@ -321,16 +321,14 @@ func computeExtentCropRegion(frames []pose.Frame, sourceW, sourceH int) (w, h, o
 		cropTop = 0
 	}
 	if cropTop+boxH > sh {
-		cropTop = sh - boxH
-	}
-	if cropTop < 0 {
-		cropTop = 0
-		boxH = sh
+		boxH = sh - cropTop
 		boxW = boxH * (float64(cropAspectW) / float64(cropAspectH))
 	}
 	if boxW > sw {
 		boxW = sw
 		boxH = boxW / (float64(cropAspectW) / float64(cropAspectH))
+		// Reposition from crop_bottom so feet stay visible.
+		cropTop = math.Max(0, cropBottom-boxH)
 	}
 
 	// Round to even dimensions.
@@ -381,12 +379,17 @@ func computeHybridSegments(frames []pose.Frame, sourceW, cropW int, trimStartMs 
 	// Smooth X for tracking trajectory.
 	smoothedCX := smoothValues(rawCX, trackingSmoothFrames)
 
-	// Compute velocity from smoothed X.
-	xVel := make([]float64, n)
+	// Compute velocity from smoothed X (n-1 values), smooth, then prepend 0.0.
+	xVelRaw := make([]float64, n-1)
 	for i := 1; i < n; i++ {
-		xVel[i] = math.Abs(smoothedCX[i] - smoothedCX[i-1])
+		xVelRaw[i-1] = math.Abs(smoothedCX[i] - smoothedCX[i-1])
 	}
-	smoothedVel := smoothValues(xVel, hybridVelSmoothFrames)
+	xVelSmoothed := smoothValues(xVelRaw, hybridVelSmoothFrames)
+
+	// Pad first frame with 0.0 velocity (smooth before pad, matching Python spike).
+	smoothedVel := make([]float64, n)
+	smoothedVel[0] = 0.0
+	copy(smoothedVel[1:], xVelSmoothed)
 
 	// Classify frames as walking/stationary.
 	isWalking := make([]bool, n)
@@ -540,11 +543,14 @@ func computeWalkingPercent(frames []pose.Frame, sourceW int) float64 {
 	}
 
 	smoothedCX := smoothValues(rawCX, trackingSmoothFrames)
-	xVel := make([]float64, n)
+	xVelRaw := make([]float64, n-1)
 	for i := 1; i < n; i++ {
-		xVel[i] = math.Abs(smoothedCX[i] - smoothedCX[i-1])
+		xVelRaw[i-1] = math.Abs(smoothedCX[i] - smoothedCX[i-1])
 	}
-	smoothedVel := smoothValues(xVel, hybridVelSmoothFrames)
+	xVelSmoothed := smoothValues(xVelRaw, hybridVelSmoothFrames)
+	smoothedVel := make([]float64, n)
+	smoothedVel[0] = 0.0
+	copy(smoothedVel[1:], xVelSmoothed)
 
 	walkCount := 0
 	for _, v := range smoothedVel {

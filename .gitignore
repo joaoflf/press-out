@@ -40,6 +40,7 @@ _bmad/
 
 # Spike output (generated artifacts)
 spikes/crop-rig/output/
+spikes/go-rig/output/
 
 # Beads
 .beads/
